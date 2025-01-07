@@ -50,6 +50,7 @@ if __name__ == "__main__":
     np.random.seed(seed)
     torch.manual_seed(seed)
 
+    # Device, get_pred_vars_laplace only works with cuda or cpu
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print('device', device)
 
@@ -64,13 +65,13 @@ if __name__ == "__main__":
     net = get_model(args.model, nc, input_size, device, seed)
 
     # Dataloaders
-    trainloader = get_quick_loader(DataLoader(ds_train, batch_size=args.bs)) # training
+    trainloader = get_quick_loader(DataLoader(ds_train, batch_size=args.bs), device=device) # training
     trainloader_eval = DataLoader(ds_train, batch_size=args.bs, shuffle=False) # train evaluation
     testloader_eval = DataLoader(ds_test, batch_size=args.bs, shuffle=False) # test evaluation
     trainloader_vars = DataLoader(ds_train, batch_size=args.bs_jacs, shuffle=False) # variance computation
 
     # Train base network and store parameters
-    net, losses = train_network(net, trainloader, args.lr, args.lrmin, args.epochs, n_train, args.delta)
+    net, losses = train_network(net, trainloader, args.lr, args.lrmin, args.epochs, n_train, args.delta, device=device)
     w_star = parameters_to_vector(net.parameters()).detach().cpu().clone()
 
     # Evaluate on training data; residuals and lambdas
@@ -91,7 +92,7 @@ if __name__ == "__main__":
     scores_dict = {'sensitivities': sensitivities}
     dir = 'pickles/'
     os.makedirs(os.path.dirname(dir), exist_ok=True)
-    with open('pickles/' + args.name_exp + '_scores.pkl', 'wb') as f:
+    with open(dir + args.name_exp + '_scores.pkl', 'wb') as f:
         pickle.dump(scores_dict, f, pickle.HIGHEST_PROTOCOL)
 
     # Random subsampling of examples for retraining
@@ -112,15 +113,18 @@ if __name__ == "__main__":
         idx_removed = indices_retrain[i]
         idx_remain = np.setdiff1d(np.arange(0, n_train, 1), idx_removed)
         ds_train_perturbed = Subset(ds_train, idx_remain)
-        trainloader_retrain = get_quick_loader(DataLoader(ds_train_perturbed, batch_size=args.bs, shuffle=True))
+        trainloader_retrain = get_quick_loader(DataLoader(ds_train_perturbed, batch_size=args.bs, shuffle=True), device=device)
 
         # Retraining
-        net, losses = train_network(net, trainloader_retrain, args.lr_retrain, args.lrmin_retrain, args.epochs_retrain, n_train-1, args.delta)
+        net, losses = train_network(net, trainloader_retrain, args.lr_retrain, args.lrmin_retrain, args.epochs_retrain, n_train-1, args.delta, device=device)
 
         # Evaluate softmax deviations
         net.eval()
         with torch.no_grad():
-            X_removed = transform_train(torch.asarray(ds_train.data[idx_removed]).numpy()).cuda()
+            if device == 'cuda':
+                X_removed = transform_train(torch.asarray(ds_train.data[idx_removed]).numpy()).cuda()
+            else:
+                X_removed = transform_train(torch.asarray(ds_train.data[idx_removed]).numpy())
             logits_wminus = net(X_removed.expand((1, -1, -1, -1)).to(device))
             probs_wminus = torch.softmax(logits_wminus, dim=-1).cpu().numpy()
             softmax_deviations[i] = probs_wminus - probs[idx_removed]

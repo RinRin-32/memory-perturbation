@@ -49,10 +49,11 @@ def get_args():
     parser.set_defaults(optim_var=False)
     return parser.parse_args()
 
-def train_one_epoch_iblr(net, optim):
+def train_one_epoch_iblr(net, optim, device):
     net.train()
     running_loss = 0
     for X, y in trainloader:
+        X, y = X.to(device), y.to(device)
         with optim.sampled_params(train=True):
             optim.zero_grad()
             fs = net(X)
@@ -63,10 +64,11 @@ def train_one_epoch_iblr(net, optim):
     scheduler.step()
     return net, optim
 
-def train_one_epoch_sgd_adam(net, optim):
+def train_one_epoch_sgd_adam(net, optim, device):
     net.train()
     running_loss = 0
     for X, y in trainloader:
+        X, y = X.to(device), y.to(device)
         def closure():
             optim.zero_grad()
             fs = net(X)
@@ -98,7 +100,7 @@ def get_optimizer():
         raise NotImplementedError
     return optim
 
-def get_prediction_vars(optim):
+def get_prediction_vars(optim, device):
     if args.optim_var:  # Variances from optimizer state
         if args.optimizer == 'adam':
             sigma_sqrs = get_covariance_from_adam(optim, args.delta, n_train)
@@ -129,27 +131,30 @@ if __name__ == "__main__":
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    # Device
+    device = 'mps' if torch.backends.mps.is_available() else 'cuda' if torch.cuda.is_available() else 'cpu'
+    if device == 'mps' and not args.optim_var:
+        device = 'cpu'
     print('device', device)
 
     # Loss
-    criterion = nn.CrossEntropyLoss(reduction='mean')
+    criterion = nn.CrossEntropyLoss(reduction='mean').to(device)
 
     # Data
     ds_train, ds_test = get_dataset(args.dataset)
     input_size = len(ds_train.data[0, :])**2
     nc = max(ds_train.targets) + 1
     n_train = len(ds_train)
-    tr_targets, te_targets = torch.asarray(ds_train.targets), torch.asarray(ds_test.targets)
+    tr_targets, te_targets = torch.asarray(ds_train.targets).to(device), torch.asarray(ds_test.targets).to(device)
 
     # Dataloaders
-    trainloader = get_quick_loader(DataLoader(ds_train, batch_size=args.bs)) # training
+    trainloader = get_quick_loader(DataLoader(ds_train, batch_size=args.bs), device=device) # training
     trainloader_eval = DataLoader(ds_train, batch_size=args.bs, shuffle=False) # train evaluation
     testloader_eval = DataLoader(ds_test, batch_size=args.bs, shuffle=False) # test evaluation
     trainloader_vars = DataLoader(ds_train, batch_size=args.bs_jacs, shuffle=False) # variance computation
 
     # Model
-    net = get_model(args.model, nc, input_size, device, seed)
+    net = get_model(args.model, nc, input_size, device, seed).to(device)
 
     # Optimizer
     optim = get_optimizer()
@@ -165,9 +170,9 @@ if __name__ == "__main__":
 
         # Train for one epoch
         if args.optimizer == 'iblr':
-            net, optim = train_one_epoch_iblr(net, optim)
+            net, optim = train_one_epoch_iblr(net, optim, device)
         else:
-            net, optim = train_one_epoch_sgd_adam(net, optim)
+            net, optim = train_one_epoch_sgd_adam(net, optim, device)
 
         # Evaluate on test data
         test_acc, test_nll = predict_test(net, testloader_eval, nc, te_targets, device)
@@ -184,7 +189,7 @@ if __name__ == "__main__":
             print("Computing sensitivities...")
 
             # Prediction variances
-            vars, optim = get_prediction_vars(optim)
+            vars, optim = get_prediction_vars(optim, device)
             vars_list.append(vars)
 
     residuals_list, vars_list, logits_list = np.asarray(residuals_list), np.asarray(vars_list), np.asarray(logits_list)

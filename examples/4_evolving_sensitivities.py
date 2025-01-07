@@ -76,7 +76,9 @@ if __name__ == "__main__":
         evaluate_iterations = [10, 2000, 10000, 24500]
     else:
         raise NotImplementedError
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    
+    # Device
+    device = 'mps' if torch.backends.mps.is_available() else 'cuda' if torch.cuda.is_available() else 'cpu'
     print('device', device)
 
     # Loss
@@ -90,7 +92,7 @@ if __name__ == "__main__":
     tr_targets, te_targets = torch.asarray(ds_train.targets), torch.asarray(ds_test.targets)
 
     # Dataloaders
-    trainloader = get_quick_loader(DataLoader(ds_train, batch_size=args.bs)) # training
+    trainloader = get_quick_loader(DataLoader(ds_train, batch_size=args.bs), device=device) # training
     trainloader_eval = DataLoader(ds_train, batch_size=args.bs, shuffle=False) # train evaluation
     testloader_eval = DataLoader(ds_test, batch_size=args.bs, shuffle=False) # test evaluation
     trainloader_vars = DataLoader(ds_train, batch_size=args.bs_jacs, shuffle=False) # variance computation

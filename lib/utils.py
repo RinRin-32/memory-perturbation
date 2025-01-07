@@ -7,7 +7,7 @@ from torch.nn import functional as F
 from torch.optim import SGD
 from torch.nn.utils import parameters_to_vector
 
-def train_network(net, trainloader, lr, lrmin, epochs, N, delta):
+def train_network(net, trainloader, lr, lrmin, epochs, N, delta, device):
     net.train()
     optim = SGD(net.parameters(), lr=lr, momentum=0.9)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=epochs, eta_min=lrmin)
@@ -18,7 +18,7 @@ def train_network(net, trainloader, lr, lrmin, epochs, N, delta):
         running_loss = 0
         for X, y in trainloader:
             optim.zero_grad()
-            X, y = X.float(), y
+            X, y = X.to(device).float(), y.to(device)
             fs = net(X)
             loss_ = criterion(fs, y)
             p_ = parameters_to_vector(net.parameters())
@@ -39,15 +39,15 @@ def get_estimated_nll(nc, residuals, vars, logits, all_targets, eps=1e-10, loco=
     probs_perturbed = torch.softmax(torch.from_numpy(logits_perturbed), dim=-1)
 
     if loco:
-        estimated_nll = - torch.sum((torch.log(probs_perturbed.clamp(min=eps)) * F.one_hot(all_targets, nc)),dim=1).mean().numpy()
+        estimated_nll = - torch.sum((torch.log(probs_perturbed.clamp(min=eps)).cpu() * F.one_hot(all_targets, nc).cpu()),dim=1).mean().numpy()
     else:
         estimated_nll = []
         for i in range(len(probs_perturbed)):
-            nll = - torch.sum((torch.log(probs_perturbed[i].clamp(min=eps)) * F.one_hot(all_targets, nc)),dim=1).mean().numpy()
+            nll = - torch.sum((torch.log(probs_perturbed[i].clamp(min=eps)).cpu() * F.one_hot(all_targets, nc).cpu()),dim=1).mean().numpy()
             estimated_nll.append(nll)
     return estimated_nll
 
-def predict_train(net, loader, nc, all_targets, device='cuda', return_logits=False, eps=1e-10):
+def predict_train(net, loader, nc, all_targets, device, return_logits=False, eps=1e-10):
     with torch.no_grad():
         net.eval()
 
@@ -69,15 +69,15 @@ def predict_train(net, loader, nc, all_targets, device='cuda', return_logits=Fal
             if return_logits:
                 logits_list = np.vstack((logits_list, logits.cpu().numpy()))
 
-        train_acc = accuracy_score(all_targets, np.concatenate(preds_list))
-        train_nll = - torch.sum((torch.log(probs_list.clamp(min=eps)) * F.one_hot(all_targets, nc)),dim=1).mean().numpy()
+        train_acc = accuracy_score(all_targets.cpu(), np.concatenate(preds_list))
+        train_nll = - torch.sum((torch.log(probs_list.clamp(min=eps)).cpu() * F.one_hot(all_targets, nc).cpu()),dim=1).mean().numpy()
 
         if return_logits:
             return res_list.tolist(), logits_list.tolist(), train_acc, train_nll
         else:
             return res_list.tolist(), train_acc, train_nll
 
-def predict_train2(net, loader, nc, all_targets, device='cuda', return_logits=False, eps=1e-10):
+def predict_train2(net, loader, nc, all_targets, device, return_logits=False, eps=1e-10):
     with torch.no_grad():
         net.eval()
 
@@ -103,14 +103,14 @@ def predict_train2(net, loader, nc, all_targets, device='cuda', return_logits=Fa
                 logits_list = np.vstack((logits_list, logits.cpu().numpy()))
 
         train_acc = accuracy_score(all_targets, np.concatenate(preds_list))
-        train_nll = - torch.sum((torch.log(probs_list.clamp(min=eps)) * F.one_hot(all_targets, nc)),dim=1).mean().numpy()
+        train_nll = - torch.sum((torch.log(probs_list.clamp(min=eps)).cpu() * F.one_hot(all_targets, nc).cpu()),dim=1).mean().numpy()
 
         if return_logits:
             return res_list.tolist(), np.asarray(probs_list.tolist()), lams_list.tolist(), logits_list.tolist(), train_acc, train_nll
         else:
             return res_list.tolist(), np.asarray(probs_list.tolist()), lams_list.tolist(), train_acc, train_nll
 
-def predict_test(net, loader, nc, all_targets, device='cuda', eps=1e-10):
+def predict_test(net, loader, nc, all_targets, device, eps=1e-10):
     with torch.no_grad():
         net.eval()
 
@@ -125,8 +125,8 @@ def predict_test(net, loader, nc, all_targets, device='cuda', eps=1e-10):
             preds_list.append(preds.cpu().numpy())
             probs_list = torch.vstack((probs_list, probs.cpu()))
 
-        test_acc = accuracy_score(all_targets, np.concatenate(preds_list))
-        test_nll = - torch.sum((torch.log(probs_list.clamp(min=eps)) * F.one_hot(all_targets, nc)),dim=1).mean().numpy()
+        test_acc = accuracy_score(all_targets.cpu(), np.concatenate(preds_list))
+        test_nll = - torch.sum((torch.log(probs_list.clamp(min=eps)).cpu() * F.one_hot(all_targets, nc).cpu()),dim=1).mean().numpy()
         return test_acc, test_nll
     
 def moving_average(y, window):
@@ -149,8 +149,5 @@ def clamp(eps, input):
     input[input < 0] = torch.clamp(input[input < 0], -(1 - eps), -eps)
     return input.cpu().numpy()
 
-def get_quick_loader(loader, device='cuda'):
-    if device=='cuda':
-        return [(X.to(device), y.to(device)) for X, y in loader]
-    else:
-        return loader
+def get_quick_loader(loader, device):
+    return [(X.to(device), y.to(device)) for X, y in loader]

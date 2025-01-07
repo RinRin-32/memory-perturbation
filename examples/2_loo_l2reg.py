@@ -85,6 +85,7 @@ if __name__ == "__main__":
     np.random.seed(seed)
     torch.manual_seed(seed)
 
+    # Device, get_pred_vars_laplace only works with cuda or cpu
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print('device', device)
 
@@ -99,7 +100,7 @@ if __name__ == "__main__":
     tr_targets, te_targets = torch.asarray(ds_train.targets), torch.asarray(ds_test.targets)
 
     # Dataloaders
-    trainloader = get_quick_loader(DataLoader(ds_train, batch_size=args.bs)) # training
+    trainloader = get_quick_loader(DataLoader(ds_train, batch_size=args.bs), device=device) # training
     trainloader_eval = DataLoader(ds_train, batch_size=args.bs, shuffle=False) # train evaluation
     testloader_eval = DataLoader(ds_test, batch_size=args.bs, shuffle=False) # test evaluation
     trainloader_vars = DataLoader(ds_train, batch_size=args.bs_jacs, shuffle=False) # variance computation
@@ -128,7 +129,7 @@ if __name__ == "__main__":
         print(f"Train Acc: {(100 * train_acc):>0.2f}%, Train NLL: {train_nll:>6f}")
 
         # Compute predictive Laplace variances
-        vars_c = get_pred_vars_laplace(net, trainloader_vars, delta, nc, 'kfac', device=device)
+        vars_c = get_pred_vars_laplace(net, trainloader_vars, delta, nc, device, 'kfac')
         vars_list.append(vars_c)
 
     residuals_list, vars_list, logits_list = np.asarray(residuals_list), np.asarray(vars_list), np.asarray(logits_list)
@@ -147,5 +148,3 @@ if __name__ == "__main__":
     os.makedirs(os.path.dirname(dir), exist_ok=True)
     with open(dir + args.name_exp + '_cv.pkl', 'wb') as f:
         pickle.dump(results_dict, f, pickle.HIGHEST_PROTOCOL)
-
-

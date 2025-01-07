@@ -50,7 +50,7 @@ if __name__ == "__main__":
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    # Device
+    # Device, get_pred_vars_laplace only works with cuda or cpu
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print('device', device)
 
@@ -65,13 +65,13 @@ if __name__ == "__main__":
     net = get_model(args.model, nc, input_size, device, seed)
 
     # Dataloaders
-    trainloader = get_quick_loader(DataLoader(ds_train, batch_size=args.bs))  # training
+    trainloader = get_quick_loader(DataLoader(ds_train, batch_size=args.bs), device=device)  # training
     trainloader_eval = DataLoader(ds_train, batch_size=args.bs, shuffle=False)  # train evaluation
     testloader_eval = DataLoader(ds_test, batch_size=args.bs, shuffle=False)  # test evaluation
     trainloader_vars = DataLoader(ds_train, batch_size=args.bs_jacs, shuffle=False)  # variance computation
 
     # Train base network and store parameters
-    net, losses = train_network(net, trainloader, args.lr, args.lrmin, args.epochs, n_train, args.delta)
+    net, losses = train_network(net, trainloader, args.lr, args.lrmin, args.epochs, n_train, args.delta, device)
     w_star = parameters_to_vector(net.parameters()).detach().cpu().clone()
 
     # Evaluate on training data; residuals and logits
@@ -95,7 +95,7 @@ if __name__ == "__main__":
         remain_index = np.setdiff1d(np.arange(0, n_train, 1), removed_ix)
         ds_train_perturbed = Subset(ds_train, remain_index)
 
-        trainloader_retrain = get_quick_loader(DataLoader(ds_train_perturbed, batch_size=args.bs, shuffle=True))
+        trainloader_retrain = get_quick_loader(DataLoader(ds_train_perturbed, batch_size=args.bs, shuffle=True), device=device)
         n_retrain = len(remain_index)
 
         # Estimate NLL
@@ -106,7 +106,7 @@ if __name__ == "__main__":
         net = net.to(device)
 
         # Retraining
-        net, _ = train_network(net, trainloader_retrain, args.lr_retrain, args.lrmin_retrain, args.epochs_retrain, n_retrain, args.delta)
+        net, _ = train_network(net, trainloader_retrain, args.lr_retrain, args.lrmin_retrain, args.epochs_retrain, n_retrain, args.delta, device)
 
         # Evaluate: get true NLL and ACC
         test_acc_wc, test_nll_wc = predict_test(net, testloader_eval, nc, te_targets, device)

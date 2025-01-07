@@ -6,7 +6,8 @@ import torch
 from torch.utils.data import DataLoader
 from torch.func import jacrev, vmap
 
-def get_pred_vars_laplace(net, trainloader, delta, nc, version='kfac', device='cuda'):
+
+def get_pred_vars_laplace(net, trainloader, delta, nc, device='cuda', version='kfac'):
     if version == 'kfac':
         hessian_structure = 'kron'
     elif version == 'diag':
@@ -18,7 +19,9 @@ def get_pred_vars_laplace(net, trainloader, delta, nc, version='kfac', device='c
         prior_precision=delta,
         backend=AsdlGGN)
 
-    torch.cuda.empty_cache()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
     laplace_object.fit(trainloader)
 
     fvars = np.empty(shape=(0, nc))
@@ -28,7 +31,9 @@ def get_pred_vars_laplace(net, trainloader, delta, nc, version='kfac', device='c
         fvars = np.vstack((fvars, np.diagonal(fvar.cpu().numpy(), axis1=1, axis2=2)))
 
     del laplace_object
-    torch.cuda.empty_cache()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
     return fvars.tolist()
 
 def make_functional(mod, disable_autograd_tracking=False):
@@ -47,7 +52,7 @@ def make_functional(mod, disable_autograd_tracking=False):
         params_values = torch.utils._pytree.tree_map(torch.Tensor.detach, params_values)
     return fmodel, params_values
 
-def get_pred_vars_optim(model, loader, sigma_diag, device='cuda'):
+def get_pred_vars_optim(model, loader, sigma_diag, device):
     fvars = []
     fnet, params = make_functional(model, disable_autograd_tracking=True)
 
@@ -56,7 +61,7 @@ def get_pred_vars_optim(model, loader, sigma_diag, device='cuda'):
         return (f, f)
 
     for X, y in loader:
-        X, y = X.to(device), y.to(device)
+        X, y = X.to(device), y.to(device)  # Move data to device
 
         Js, f = vmap(jacrev(fnet_single, has_aux=True), (None, 0))(params, X)
         Js = torch.cat([j.flatten(2) for j in Js], dim=2)
@@ -64,7 +69,7 @@ def get_pred_vars_optim(model, loader, sigma_diag, device='cuda'):
         fvar = fvar.diagonal(dim1=1, dim2=2)
         fvars.append(fvar)
 
-    fvars = torch.squeeze(torch.cat(fvars)).cpu()
+    fvars = torch.squeeze(torch.cat(fvars)).cpu()  # Move result back to CPU
     return fvars.tolist()
 
 def get_covariance_from_iblr(optim):
@@ -94,4 +99,3 @@ def get_covariance_from_adam(optim, delta, n_train):
                 sigma_sqr = 1 / (torch.flatten(torch.sqrt(state['exp_avg_sq'])) * n_train + delta)
                 sigma_sqrs.append(sigma_sqr.tolist())
     return sigma_sqrs
-
