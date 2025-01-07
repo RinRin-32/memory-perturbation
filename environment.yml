@@ -4,6 +4,7 @@ channels:
   - pytorch
   - nvidia
 dependencies:
+  - python ==3.12
   - matplotlib
   - scikit-learn
   - tqdm
