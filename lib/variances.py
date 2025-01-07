@@ -19,7 +19,7 @@ def get_pred_vars_laplace(net, trainloader, delta, nc, device='cuda', version='k
         prior_precision=delta,
         backend=AsdlGGN)
 
-    if torch.cuda.is_available():
+    if device == 'cuda':
         torch.cuda.empty_cache()
 
     laplace_object.fit(trainloader)
@@ -31,7 +31,7 @@ def get_pred_vars_laplace(net, trainloader, delta, nc, device='cuda', version='k
         fvars = np.vstack((fvars, np.diagonal(fvar.cpu().numpy(), axis1=1, axis2=2)))
 
     del laplace_object
-    if torch.cuda.is_available():
+    if device == 'cuda':
         torch.cuda.empty_cache()
 
     return fvars.tolist()
