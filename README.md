@@ -11,7 +11,6 @@ Paper: https://arxiv.org/abs/2310.19273
 ## Installation
 
 - To create a conda environment `mpe` with all necessary dependencies run: `conda env create --file environment.yml`
-- Additionally, run `pip install git+https://git@github.com/wiseodd/asdl@asdfghjkl` in the mpe environment to gain access to `asdfghjkl` backend and `AsdlGGN`
 - We use torch 2.2.1 with cuda 12.1.1
 
 **Additional information on dependencies**

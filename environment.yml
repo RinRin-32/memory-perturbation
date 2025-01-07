@@ -15,3 +15,4 @@ dependencies:
     - torchaudio
     - ivon-opt==0.1
     - laplace-torch==0.1a2
+    - git+https://git@github.com/wiseodd/asdl@asdfghjkl
