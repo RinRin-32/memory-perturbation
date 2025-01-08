@@ -12,6 +12,7 @@ Paper: https://arxiv.org/abs/2310.19273
 
 - To create a conda environment `mpe` with all necessary dependencies run: `conda env create --file environment.yml`
 - We use torch 2.2.1 with cuda 12.1.1
+- The current environment.yml file limits python to be lower than version 3.13
 
 **Additional information on dependencies**
 
