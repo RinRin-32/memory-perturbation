@@ -83,7 +83,7 @@ if __name__ == "__main__":
     print(f"Test Acc: {(100 * test_acc):>0.2f}%, Test NLL: {test_nll:>6f}")
 
     # Compute prediction variances
-    vars = get_pred_vars_laplace(net, trainloader_vars, args.delta, nc, version='kfac', device=device)
+    vars = get_pred_vars_laplace(net, trainloader_vars, args.delta, nc, device, version='kfac')
 
     # Compute and store sensitivities
     sensitivities = np.asarray(residuals) * np.asarray(lambdas) * np.asarray(vars)

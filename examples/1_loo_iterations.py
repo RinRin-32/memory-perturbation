@@ -113,9 +113,9 @@ def get_prediction_vars(optim, device):
 
     else:  # Laplace variance approximation
         if args.var_version == 'kfac':
-            vars = get_pred_vars_laplace(net, trainloader_vars, args.delta, nc, version='kfac')
+            vars = get_pred_vars_laplace(net, trainloader_vars, args.delta, nc, device, version='kfac')
         elif args.var_version == 'diag':
-            vars = get_pred_vars_laplace(net, trainloader_vars, args.delta, nc, version='diag')
+            vars = get_pred_vars_laplace(net, trainloader_vars, args.delta, nc, device, version='diag')
         else:
             raise NotImplementedError
 
