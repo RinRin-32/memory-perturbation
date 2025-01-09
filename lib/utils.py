@@ -33,6 +33,26 @@ def train_network(net, trainloader, lr, lrmin, epochs, N, delta, device):
 
     return net, losses
 
+def train_iblr(net, criterion, optim, scheduler, trainloader, lr, lrmin, epochs, N, delta, device):
+    net.train()
+
+    losses = []
+    for _ in tqdm.tqdm(list(range(epochs))):
+        running_loss = 0
+        for X, y in trainloader:
+            X, y = X.to(device).float(), y.to(device)
+            with optim.sampled_params(train=True):
+                optim.zero_grad()
+                fs=net(X)
+                loss = criterion(fs, y)
+                loss.backward()
+            optim.step()
+            running_loss += loss.item()
+        losses.append(running_loss)
+        scheduler.step()
+    return net, losses
+
+
 def get_estimated_nll(nc, residuals, vars, logits, all_targets, eps=1e-10, loco=False):
     sensitivities = residuals * vars
     logits_perturbed = sensitivities + logits
