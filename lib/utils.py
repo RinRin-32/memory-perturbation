@@ -73,7 +73,7 @@ def predict_train(net, loader, nc, all_targets, device, return_logits=False, eps
         train_nll = - torch.sum((torch.log(probs_list.clamp(min=eps)).cpu() * F.one_hot(all_targets, nc).cpu()),dim=1).mean().numpy()
 
         if return_logits:
-            return res_list.tolist(), logits_list.tolist(), train_acc, train_nll
+            return res_list.tolist(), np.asarray(probs_list.tolist()), logits_list.tolist(), train_acc, train_nll
         else:
             return res_list.tolist(), train_acc, train_nll
 
