@@ -75,7 +75,7 @@ if __name__ == "__main__":
     w_star = parameters_to_vector(net.parameters()).detach().cpu().clone()
 
     # Evaluate on training data; residuals and logits
-    residuals, tr_logits, train_acc, train_nll = predict_train(net, trainloader_eval, nc, tr_targets, device, return_logits=True)
+    residuals, _, tr_logits, train_acc, train_nll = predict_train(net, trainloader_eval, nc, tr_targets, device, return_logits=True)
     print(f"Train Acc: {(100 * train_acc):>0.2f}%, Train NLL: {train_nll:>6f}")
 
     # Evaluate on test data

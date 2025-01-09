@@ -183,7 +183,7 @@ if __name__ == "__main__":
             epochs_list.append(epoch + 1)
 
             # Evaluate on training data; residuals and logits
-            residuals, logits, train_acc, train_nll = predict_train(net, trainloader_eval, nc, tr_targets, device, return_logits=True)
+            residuals, _, logits, train_acc, train_nll = predict_train(net, trainloader_eval, nc, tr_targets, device, return_logits=True)
             residuals_list.append(residuals), logits_list.append(logits)
             print(f"Train Acc: {(100 * train_acc):>0.2f}%, Train NLL: {train_nll:>6f}")
             print("Computing sensitivities...")
