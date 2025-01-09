@@ -1,6 +1,9 @@
 import torchvision
 import torchvision.transforms as transforms
 import torch
+from sklearn.datasets import make_moons
+from torch.utils.data import TensorDataset
+
 
 transform_usps = transforms.Compose([
     transforms.ToTensor(),
@@ -18,6 +21,9 @@ transform_cifar10 = transforms.Compose([
     transforms.ToTensor(),
     transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
 ])
+transform_moon = transforms.Compose([
+    transforms.Lambda(lambda x: torch.tensor(x, dtype=torch.float32))
+])
 
 def get_dataset(name_dataset, return_transform=False):
     if name_dataset == 'MNIST':
@@ -29,6 +35,9 @@ def get_dataset(name_dataset, return_transform=False):
     elif name_dataset == 'CIFAR10':
         ds_train, ds_test = load_cifar10()
         transform = transform_cifar10
+    elif name_dataset == 'MOON':
+        ds_train, ds_test = load_moon()
+        transform = transform_moon
     else:
         raise NotImplementedError
     if return_transform:
@@ -63,4 +72,24 @@ def load_fmnist():
         root='../data', train=True, download=True, transform=transform_fmnist)
     testset = torchvision.datasets.FashionMNIST(
         root='../data', train=False, download=True, transform=transform_fmnist)
+    return trainset, testset
+
+def load_moon(n_samples=1000, noise=0.1, test_split=0.2):
+    X, y = make_moons(n_samples=n_samples, noise=noise, random_state=42)
+
+    # Split into train/test
+    split_idx = int(len(X) * (1 - test_split))
+    X_train, X_test = X[:split_idx], X[split_idx:]
+    y_train, y_test = y[:split_idx], y[split_idx:]
+
+    # Convert to PyTorch tensors
+    X_train = torch.tensor(X_train, dtype=torch.float32)
+    X_test = torch.tensor(X_test, dtype=torch.float32)
+    y_train = torch.tensor(y_train, dtype=torch.long)
+    y_test = torch.tensor(y_test, dtype=torch.long)
+
+    # Create a custom Dataset
+    trainset = TensorDataset(X_train, y_train)
+    testset = TensorDataset(X_test, y_test)
+
     return trainset, testset
