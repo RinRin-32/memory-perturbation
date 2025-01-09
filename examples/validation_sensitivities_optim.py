@@ -4,6 +4,8 @@ import pickle
 import argparse
 import numpy as np
 
+import tqdm
+
 import torch
 from torch import nn
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
@@ -15,7 +17,7 @@ from ivon import IVON as IBLR
 sys.path.append("..")
 from lib.models import get_model
 from lib.datasets import get_dataset
-from lib.utils import get_quick_loader, predict_train, predict_test, flatten, get_estimated_nll, train_network
+from lib.utils import get_quick_loader, predict_train, predict_test, flatten, get_estimated_nll, train_network, train_iblr
 from lib.variances import get_covariance_from_iblr, get_covariance_from_adam, get_pred_vars_laplace, get_pred_vars_optim
 
 
@@ -26,7 +28,7 @@ def get_args():
     parser.add_argument('--name_exp', default='mnist_mlp_ibr', type=str, help='name of experiment')
 
     # Data, Model
-    parser.add_argument('--dataset', default='MNIST', choices=['MNIST', 'FMNIST', 'CIFAR10'])
+    parser.add_argument('--dataset', default='MNIST', choices=['MNIST', 'FMNIST', 'CIFAR10', 'MOON'])
     parser.add_argument('--model', default='large_mlp',choices=['large_mlp', 'lenet', 'cnn_deepobs'])
 
     # Optimization
@@ -150,10 +152,16 @@ if __name__ == "__main__":
 
     # Data
     ds_train, ds_test, transform_train = get_dataset(args.dataset, return_transform=True)
-    input_size = len(ds_train.data[0, :])**2
-    nc = max(ds_train.targets) + 1
+    if args.dataset != 'MOON':
+        input_size = len(ds_train.data[0, :])**2
+        nc = max(ds_train.targets) + 1
+        tr_targets, te_targets = torch.asarray(ds_train.targets), torch.asarray(ds_test.targets)
+    else:
+        input_size = ds_train[0][0].numel()
+        nc = len(torch.unique(torch.asarray([target for _, target in ds_train])))
+        tr_targets = torch.asarray([target for _, target in ds_train])
+        te_targets = torch.asarray([target for _, target in ds_test])
     n_train = len(ds_train)
-    tr_targets, te_targets = torch.asarray(ds_train.targets), torch.asarray(ds_test.targets)
 
     # Model
     net = get_model(args.model, nc, input_size, device, seed)
@@ -172,21 +180,12 @@ if __name__ == "__main__":
 
     # Training
     test_accs, test_nlls, epochs_list = [], [], []
-    for epoch in range(args.epochs):
-        print(f"Epoch {epoch + 1}\n-------------------------------")
-
+    for _ in tqdm.tqdm(list(range(args.epochs))):
         # Train for one epoch
         if args.optimizer == 'iblr':
             net, optim = train_one_epoch_iblr(net, optim, device)
         else:
             net, optim = train_one_epoch_sgd_adam(net, optim, device)
-
-        # Evaluate on test data
-        test_acc, test_nll = predict_test(net, testloader_eval, nc, te_targets, device)
-        test_accs.append(test_acc), test_nlls.append(test_nll)
-        print(f"Test Acc: {(100 * test_acc):>0.2f}%, Test NLL: {test_nll:>6f}")
-
-
 
     # Evaluate on training data; residuals and logits
     residuals, prob, logits, train_acc, train_nll = predict_train(net, trainloader_eval, nc, tr_targets, device, return_logits=True)
@@ -240,20 +239,40 @@ if __name__ == "__main__":
         # Remove one example from training set
         idx_removed = indices_retrain[i]
         idx_remain = np.setdiff1d(np.arange(0, n_train, 1), idx_removed)
-        ds_train_perturbed = Subset(ds_train, idx_remain)
+
+        if args.dataset == 'MOON':
+            # Extract the input tensor of the example to remove, convert to a list for comparison
+            X_removed = ds_train[idx_removed][0].tolist()  # Flatten the tensor to a list for comparison
+
+            # Use list comprehension to filter out the example
+            ds_train_perturbed_list = [(x.tolist(), y) for x, y in ds_train if x.tolist() != X_removed]
+            ds_train_perturbed = [(torch.tensor(x).to(device), torch.tensor(y).to(device)) for x, y in ds_train_perturbed_list]
+
+            X_removed = torch.tensor(X_removed)
+        else:
+            # For other datasets (like MNIST, CIFAR10), you can use the default removal
+            ds_train_perturbed = Subset(ds_train, idx_remain)
+
         trainloader_retrain = get_quick_loader(DataLoader(ds_train_perturbed, batch_size=args.bs, shuffle=True), device=device)
 
         # Retraining
-        net, losses = train_network(net, trainloader_retrain, args.lr_retrain, args.lrmin_retrain, args.epochs_retrain, n_train-1, args.delta, device=device)
+        if args.optimizer == 'iblr':
+            net, losses = train_iblr(net, criterion, optim, scheduler, trainloader_retrain, args.lr_retrain, args.lrmin_retrain, args.epochs_retrain, n_train-1, args.delta, device=device)
+        else:
+            net, losses = train_network(net, trainloader_retrain, args.lr_retrain, args.lrmin_retrain, args.epochs_retrain, n_train-1, args.delta, device=device)
 
         # Evaluate softmax deviations
         net.eval()
         with torch.no_grad():
-            if device == 'cuda':
+            if args.dataset == 'MOON':
+                X_removed = X_removed.unsqueeze(0)
+                logits_wminus = net(X_removed.to(device))
+            elif device == 'cuda':
                 X_removed = transform_train(torch.asarray(ds_train.data[idx_removed]).numpy()).cuda()
+                logits_wminus = net(X_removed.expand((1, -1, -1, -1)).to(device))
             else:
                 X_removed = transform_train(torch.asarray(ds_train.data[idx_removed]).numpy())
-            logits_wminus = net(X_removed.expand((1, -1, -1, -1)).to(device))
+                logits_wminus = net(X_removed.expand((1, -1, -1, -1)).to(device))
             probs_wminus = torch.softmax(logits_wminus, dim=-1).cpu().numpy()
             softmax_deviations[i] = probs_wminus - probs[idx_removed]
 
