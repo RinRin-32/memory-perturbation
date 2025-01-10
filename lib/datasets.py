@@ -25,7 +25,7 @@ transform_moon = transforms.Compose([
     transforms.Lambda(lambda x: torch.tensor(x, dtype=torch.float32))
 ])
 
-def get_dataset(name_dataset, return_transform=False):
+def get_dataset(name_dataset, return_transform=False, n_samples=1000, noise=5, test_split=0.2):
     if name_dataset == 'MNIST':
         ds_train, ds_test = load_mnist()
         transform = transform_mnist
@@ -36,7 +36,7 @@ def get_dataset(name_dataset, return_transform=False):
         ds_train, ds_test = load_cifar10()
         transform = transform_cifar10
     elif name_dataset == 'MOON':
-        ds_train, ds_test = load_moon()
+        ds_train, ds_test = load_moon(n_samples, noise, test_split)
         transform = transform_moon
     else:
         raise NotImplementedError
@@ -74,7 +74,7 @@ def load_fmnist():
         root='../data', train=False, download=True, transform=transform_fmnist)
     return trainset, testset
 
-def load_moon(n_samples=1000, noise=0.1, test_split=0.2):
+def load_moon(n_samples=1000, noise=0.2, test_split=0.2):
     X, y = make_moons(n_samples=n_samples, noise=noise, random_state=42)
 
     # Split into train/test

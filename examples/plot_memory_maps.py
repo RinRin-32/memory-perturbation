@@ -13,7 +13,7 @@ if __name__ == "__main__":
 
     # Load sensitivities
     dir = 'pickles/'
-    file = open(dir + args.name_exp + '_memory_maps.pkl', 'rb')
+    file = open(dir + args.name_exp + '_memory_maps_scores.pkl', 'rb')
     scores_dict = pickle.load(file)
     file.close()
     bpe = scores_dict['bpe']

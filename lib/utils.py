@@ -33,7 +33,7 @@ def train_network(net, trainloader, lr, lrmin, epochs, N, delta, device):
 
     return net, losses
 
-def train_iblr(net, criterion, optim, scheduler, trainloader, lr, lrmin, epochs, N, delta, device):
+def train_model(net, criterion, optim, scheduler, trainloader, epochs, N, delta, device, adam=False):
     net.train()
 
     losses = []
@@ -41,10 +41,22 @@ def train_iblr(net, criterion, optim, scheduler, trainloader, lr, lrmin, epochs,
         running_loss = 0
         for X, y in trainloader:
             X, y = X.to(device).float(), y.to(device)
-            with optim.sampled_params(train=True):
+            if not adam:
+                with optim.sampled_params(train=True):
+                    optim.zero_grad()
+                    fs=net(X)
+                    loss_ = criterion(fs, y)
+                    p_ = parameters_to_vector(net.parameters())
+                    reg_ = 1 / 2 * delta * p_.square().sum()
+                    loss = loss_ + (1/N) * reg_
+                    loss.backward()
+            else:
                 optim.zero_grad()
                 fs=net(X)
-                loss = criterion(fs, y)
+                loss_ = criterion(fs, y)
+                p_ = parameters_to_vector(net.parameters())
+                reg_ = 1 / 2 * delta * p_.square().sum()
+                loss = loss_ + (1/N) * reg_
                 loss.backward()
             optim.step()
             running_loss += loss.item()
@@ -130,7 +142,7 @@ def predict_train2(net, loader, nc, all_targets, device, return_logits=False, ep
         else:
             return res_list.tolist(), np.asarray(probs_list.tolist()), lams_list.tolist(), train_acc, train_nll
 
-def predict_nll_hess(net, loader, nc, all_targets, device, return_logits=False, eps=1e-10):
+def predict_nll_hess(net, loader, nc, all_targets, device, eps=1e-10):
     with torch.no_grad():
         net.eval()
 
@@ -155,7 +167,7 @@ def predict_nll_hess(net, loader, nc, all_targets, device, return_logits=False, 
         acc = accuracy_score(all_targets, torch.cat(preds_list).numpy())
         nll = - torch.sum((torch.log(torch.clamp(probs_list, eps, 1-eps)) * F.one_hot(all_targets, nc)),dim=1).mean().numpy()
         
-    return torch.vstack(res_list), torch.vstack(logits_list), torch.vstack(nll_hess_list), acc, nll
+    return torch.vstack(res_list), np.asarray(probs_list.tolist()), torch.vstack(logits_list), torch.vstack(nll_hess_list), acc, nll
 
 
 def predict_test(net, loader, nc, all_targets, device, eps=1e-10):
