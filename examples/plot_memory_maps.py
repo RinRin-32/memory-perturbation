@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import argparse
 
 def get_args():
-    parser = argparse.ArgumentParser(description='Compare sensitivities to true deviations in softmax outputs from retraining.')
+    parser = argparse.ArgumentParser(description='Plot memory maps')
     parser.add_argument('--name_exp', default='mnist_mlp', type=str, help='name of experiment')
     return parser.parse_args()
 
@@ -13,10 +13,9 @@ if __name__ == "__main__":
 
     # Load sensitivities
     dir = 'pickles/'
-    file = open(dir + args.name_exp + '.pkl', 'rb')
+    file = open(dir + args.name_exp + '_memory_maps.pkl', 'rb')
     scores_dict = pickle.load(file)
     file.close()
-    sensitivities = scores_dict['sensitivities']
     bpe = scores_dict['bpe']
     bls = scores_dict['bls']
 
