@@ -88,22 +88,8 @@ if __name__ == "__main__":
     # Compute and store sensitivities
     sensitivities = np.asarray(residuals) * np.asarray(lambdas) * np.asarray(vars)
     sensitivities = np.sum(np.abs(sensitivities), axis=-1)
-    bpe = np.sum(np.abs(np.asarray(residuals)), axis=-1)
-    bls = np.sum(np.abs(np.asarray(vars)), axis=-1)
 
-    def min_max_scale(arr):
-        min_val = np.min(arr)
-        max_val = np.max(arr)
-        return (arr - min_val) / (max_val - min_val)
-    
-    bpe = min_max_scale(bpe)
-    bls = min_max_scale(bls)
-
-    print(f'BPE: {bpe.max()} {bpe.min()}, BLS: {bls.max()} {bls.min()}')
-
-    scores_dict = {'sensitivities': sensitivities,
-                   'bpe': bpe,
-                   'bls': bls}
+    scores_dict = {'sensitivities': sensitivities}
     dir = 'pickles/'
     os.makedirs(os.path.dirname(dir), exist_ok=True)
     with open(dir + args.name_exp + '_scores.pkl', 'wb') as f:
@@ -152,4 +138,3 @@ if __name__ == "__main__":
                      }
     with open('pickles/' + args.name_exp + '_retrain.pkl', 'wb') as f:
         pickle.dump(retrain_dict, f, pickle.HIGHEST_PROTOCOL)
-
