@@ -8,17 +8,17 @@ import tqdm
 
 import torch
 from torch import nn
-from torch.nn.utils import parameters_to_vector, vector_to_parameters
-from torch.utils.data import DataLoader, Subset
-from torch.optim import SGD, Adam, AdamW
+from torch.nn.utils import parameters_to_vector
+from torch.utils.data import DataLoader
+from torch.optim import Adam
 
 from ivon import IVON as IBLR
 
 sys.path.append("..")
 from lib.models import get_model
 from lib.datasets import get_dataset
-from lib.utils import get_quick_loader, predict_train, predict_test, flatten, get_estimated_nll, train_network, train_iblr, predict_nll_hess
-from lib.variances import get_covariance_from_iblr, get_covariance_from_adam, get_pred_vars_laplace, get_pred_vars_optim
+from lib.utils import get_quick_loader, predict_test, flatten, predict_nll_hess
+from lib.variances import get_covariance_from_iblr, get_covariance_from_adam, get_pred_vars_optim
 
 
 def get_args():
@@ -29,10 +29,10 @@ def get_args():
 
     # Data, Model
     parser.add_argument('--dataset', default='MNIST', choices=['MNIST', 'FMNIST', 'CIFAR10', 'MOON'])
-    parser.add_argument('--model', default='lenet',choices=['large_mlp', 'lenet', 'cnn_deepobs'])
+    parser.add_argument('--model', default='lenet',choices=['large_mlp', 'lenet', 'small_mlp', 'cnn_deepobs'])
 
     # Optimization
-    parser.add_argument('--optimizer', default='iblr', choices=['iblr'])
+    parser.add_argument('--optimizer', default='iblr', choices=['iblr', 'adam'])
     parser.add_argument('--lr', default=1e-2, type=float, help='learning rate')
     parser.add_argument('--lrmin', default=1e-4, type=float, help='min learning rate of scheduler')
     parser.add_argument('--bs', default=256, type=int, help='batch size')
@@ -45,7 +45,6 @@ def get_args():
     # Variance computation
     # Variance computation
     parser.add_argument('--optim_var', dest='optim_var', action='store_true', help='variance from optimizer (IBLR, Adam)')
-    parser.add_argument('--var_version', default='kfac', choices=['kfac', 'diag'], help='Laplace-GGN matrix structure', )
     parser.add_argument('--bs_jacs', default=50, type=int, help='Jacobian batch size for variance computation')
     parser.set_defaults(optim_var=False)
     return parser.parse_args()
@@ -74,11 +73,8 @@ def train_one_epoch_sgd_adam(net, optim, device):
             optim.zero_grad()
             fs = net(X)
             loss_ = criterion(fs, y)
-            if args.optimizer == 'adamw':
-                reg_ = 0
-            else:
-                p_ = parameters_to_vector(net.parameters())
-                reg_ = 1/2 * args.delta * p_.square().sum()
+            p_ = parameters_to_vector(net.parameters())
+            reg_ = 1/2 * args.delta * p_.square().sum()
             loss = loss_ + (1/n_train)*reg_
             loss.backward()
             return loss, fs
@@ -90,35 +86,22 @@ def train_one_epoch_sgd_adam(net, optim, device):
 def get_optimizer():
     if args.optimizer == 'adam':
         optim = Adam(net.parameters(), lr=args.lr, weight_decay=0)
-    elif args.optimizer == 'adamw':
-        optim = AdamW(net.parameters(), lr=args.lr, weight_decay=args.delta / n_train)
     elif args.optimizer == 'iblr':
         optim = IBLR(net.parameters(), lr=args.lr, mc_samples=1, ess=n_train, weight_decay=args.delta/n_train,
                       beta1=0.9, beta2=0.99999, hess_init=args.hess_init)
-    elif args.optimizer == 'sgd':
-        optim = SGD(net.parameters(), lr=args.lr, momentum=0.9)
     else:
         raise NotImplementedError
     return optim
 
 def get_prediction_vars(optim, device):
-    if args.optim_var:  # Variances from optimizer state
-        if args.optimizer == 'adam':
-            sigma_sqrs = get_covariance_from_adam(optim, args.delta, n_train)
-        elif args.optimizer == 'iblr':
-            sigma_sqrs = get_covariance_from_iblr(optim)
-        else:
-            raise NotImplementedError
-        sigma_sqrs = torch.asarray(flatten(sigma_sqrs)).to(device)
-        vars = get_pred_vars_optim(net, trainloader_vars, sigma_sqrs, device, tensor=True)
-
-    else:  # Laplace variance approximation
-        if args.var_version == 'kfac':
-            vars = get_pred_vars_laplace(net, trainloader_vars, args.delta, nc, device, version='kfac')
-        elif args.var_version == 'diag':
-            vars = get_pred_vars_laplace(net, trainloader_vars, args.delta, nc, device, version='diag')
-        else:
-            raise NotImplementedError
+    if args.optimizer == 'adam':
+        sigma_sqrs = get_covariance_from_adam(optim, args.delta, n_train)
+    elif args.optimizer == 'iblr':
+        sigma_sqrs = get_covariance_from_iblr(optim)
+    else:
+        raise NotImplementedError
+    sigma_sqrs = torch.asarray(flatten(sigma_sqrs)).to(device)
+    vars = get_pred_vars_optim(net, trainloader_vars, sigma_sqrs, device, tensor=True)
 
     return vars, optim
 
@@ -126,6 +109,9 @@ def get_prediction_vars(optim, device):
 if __name__ == "__main__":
     args = get_args()
     print(args)
+
+    if args.dataset == 'MOON' and (args.model == 'lenet' or args.model == 'cnn_deepobs'):
+        raise NotImplementedError(f'{args.model} does not support the moon dataset')
 
     seed = 1
     np.random.seed(seed)
@@ -144,11 +130,16 @@ if __name__ == "__main__":
 
     # Data
     ds_train, ds_test, transform_train = get_dataset(args.dataset, return_transform=True)
-
-    input_size = len(ds_train.data[0, :])**2
-    nc = max(ds_train.targets) + 1
+    if args.dataset != 'MOON':
+        input_size = len(ds_train.data[0, :])**2
+        nc = max(ds_train.targets) + 1
+        tr_targets, te_targets = torch.asarray(ds_train.targets), torch.asarray(ds_test.targets)
+    else:
+        input_size = ds_train[0][0].numel()
+        nc = len(torch.unique(torch.asarray([target for _, target in ds_train])))
+        tr_targets = torch.asarray([target for _, target in ds_train])
+        te_targets = torch.asarray([target for _, target in ds_test])
     n_train = len(ds_train)
-    tr_targets, te_targets = torch.asarray(ds_train.targets), torch.asarray(ds_test.targets)
 
     # Model
     net = get_model(args.model, nc, input_size, device, seed)
@@ -168,14 +159,15 @@ if __name__ == "__main__":
     residual_upper, leverage_upper = 0.,0.
     test_nll_lst, loocv_lst = [], []
     for _ in tqdm.tqdm(list(range(args.epochs))):
-        net, optim = train_one_epoch_iblr(net, optim, device)
+        if args.optimizer == 'iblr':
+            net, optim = train_one_epoch_iblr(net, optim, device)
+        else:
+            net, optim = train_one_epoch_sgd_adam(net, optim, device)
 
         test_acc, test_nll = predict_test(net, testloader_eval, nc, te_targets, device)
-        print(f"Test Acc: {(100 * test_acc):>0.2f}%, Test NLL: {test_nll:>6f}")
         test_nll_lst.append(test_nll)
 
         residuals, logits, nll_hess, train_acc, train_nll = predict_nll_hess(net, trainloader_eval, nc, tr_targets, device, return_logits=True)
-        print(f"Train Acc: {(100 * train_acc):>0.2f}%, Train NLL: {train_nll:>6f}")
 
         vars, optim = get_prediction_vars(optim, device)
 
@@ -187,6 +179,9 @@ if __name__ == "__main__":
 
         leverage_upper = lev_scores_summary.max() if lev_scores_summary.max() > leverage_upper else leverage_upper
         residual_upper = residuals_summary.max() if residuals_summary.max() > residual_upper else residual_upper
+    
+    print(f"Test Acc: {(100 * test_acc):>0.2f}%, Test NLL: {test_nll:>6f}")
+    print(f"Train Acc: {(100 * train_acc):>0.2f}%, Train NLL: {train_nll:>6f}")
     
     scores_dict = {'bpe': residuals_summary,
                    'bls': lev_scores_summary}
