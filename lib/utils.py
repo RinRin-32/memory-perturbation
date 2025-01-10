@@ -130,6 +130,34 @@ def predict_train2(net, loader, nc, all_targets, device, return_logits=False, ep
         else:
             return res_list.tolist(), np.asarray(probs_list.tolist()), lams_list.tolist(), train_acc, train_nll
 
+def predict_nll_hess(net, loader, nc, all_targets, device, return_logits=False, eps=1e-10):
+    with torch.no_grad():
+        net.eval()
+
+        preds_list = []
+        res_list, logits_list, probs_list, nll_hess_list = [], [], [], []
+        for X, y in loader:
+            X, y = X.to(device), y.to(device)
+
+            logits = net.forward(X)
+            probs = F.softmax(logits, dim=-1)
+            _, preds = probs.max(1)
+
+            preds_list.append(preds.cpu().detach())
+            probs_list.append(probs.cpu().detach())
+            residuals = probs - F.one_hot(y, nc)
+            res_list.append(residuals.cpu().detach())
+            logits_list.append(logits.cpu().detach())
+            nll_hess = torch.diag_embed(probs) - torch.einsum('ij,ik->ijk', probs, probs)
+            nll_hess_list.append(nll_hess.cpu().detach())
+
+        probs_list = torch.vstack(probs_list)
+        acc = accuracy_score(all_targets, torch.cat(preds_list).numpy())
+        nll = - torch.sum((torch.log(torch.clamp(probs_list, eps, 1-eps)) * F.one_hot(all_targets, nc)),dim=1).mean().numpy()
+        
+    return torch.vstack(res_list), torch.vstack(logits_list), torch.vstack(nll_hess_list), acc, nll
+
+
 def predict_test(net, loader, nc, all_targets, device, eps=1e-10):
     with torch.no_grad():
         net.eval()

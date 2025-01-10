@@ -52,7 +52,7 @@ def make_functional(mod, disable_autograd_tracking=False):
         params_values = torch.utils._pytree.tree_map(torch.Tensor.detach, params_values)
     return fmodel, params_values
 
-def get_pred_vars_optim(model, loader, sigma_diag, device):
+def get_pred_vars_optim(model, loader, sigma_diag, device, tensor=False):
     fvars = []
     fnet, params = make_functional(model, disable_autograd_tracking=True)
 
@@ -66,11 +66,15 @@ def get_pred_vars_optim(model, loader, sigma_diag, device):
         Js, f = vmap(jacrev(fnet_single, has_aux=True), (None, 0))(params, X)
         Js = torch.cat([j.flatten(2) for j in Js], dim=2)
         fvar = torch.einsum('nkp,p,ncp->nkc', Js, sigma_diag, Js)
-        fvar = fvar.diagonal(dim1=1, dim2=2)
+        if not tensor:
+            fvar = fvar.diagonal(dim1=1, dim2=2)
         fvars.append(fvar)
 
     fvars = torch.squeeze(torch.cat(fvars)).cpu()  # Move result back to CPU
-    return fvars.tolist()
+    if not tensor:
+        return fvars.tolist()
+    else:
+        return fvars
 
 def get_covariance_from_iblr(optim):
     sigma_sqrs = []
