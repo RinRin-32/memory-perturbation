@@ -2,6 +2,7 @@ import os
 import pickle
 import matplotlib.pyplot as plt
 import argparse
+import numpy as np
 
 def get_args():
     parser = argparse.ArgumentParser(description='Plot memory maps')
@@ -16,10 +17,13 @@ if __name__ == "__main__":
     file = open(dir + args.name_exp + '_memory_maps_scores.pkl', 'rb')
     scores_dict = pickle.load(file)
     file.close()
+
     bpe = scores_dict['bpe']
     bls = scores_dict['bls']
+    X_train = scores_dict['X_train'].numpy()  # Assuming it's a tensor, convert to numpy
+    y_train = scores_dict['y_train'].numpy()  # Convert to numpy
 
-    # Figure
+    # Plot 1: Bayesian Prediction Error vs Bayesian Leverage Score
     fig, ax = plt.subplots()
 
     fontsize = 23
@@ -34,22 +38,32 @@ if __name__ == "__main__":
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
 
-    # Plot results
-    #xpoints = ypoints = plt.ylim()
-    #plt.plot(xpoints, ypoints, linestyle='--', color='0.5', lw=5, scalex=False, scaley=False, zorder=-10)
     plt.scatter(bls, bpe, edgecolor='r', facecolor='w', marker=".", s=75)
 
-    # Save figure
+    # Save first figure
     dir = 'plots/'
     os.makedirs(os.path.dirname(dir), exist_ok=True)
     plt.tight_layout()
-    plt.savefig(dir+args.name_exp+'_memory_map.pdf', format="pdf")
+    plt.savefig(dir + args.name_exp + '_memory_map.pdf', format="pdf")
     plt.show()
     plt.close()
 
+    # Plot 2: 2D Feature Visualization
+    fig, ax = plt.subplots()
+    
+    scatter = plt.scatter(X_train[:, 0], X_train[:, 1], c=y_train, cmap='viridis', s=10)
+    plt.colorbar(scatter, label='Class')
 
+    plt.xlabel('Feature 1', fontsize=fontsize)
+    plt.ylabel('Feature 2', fontsize=fontsize)
+    plt.xticks(fontsize=fontsize-2)
+    plt.yticks(fontsize=fontsize-2)
+    plt.grid(True, alpha=0.5)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
 
-
-
-
-
+    # Save second figure
+    plt.tight_layout()
+    plt.savefig(dir + args.name_exp + '_2d_features.pdf', format="pdf")
+    plt.show()
+    plt.close()

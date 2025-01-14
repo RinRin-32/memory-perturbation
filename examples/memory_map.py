@@ -17,7 +17,7 @@ from ivon import IVON as IBLR
 sys.path.append("..")
 from lib.models import get_model
 from lib.datasets import get_dataset
-from lib.utils import get_quick_loader, predict_test, flatten, predict_nll_hess, train_model, predict_train2
+from lib.utils import get_quick_loader, predict_test, flatten, predict_nll_hess, train_model, predict_train2, train_network
 from lib.variances import get_covariance_from_iblr, get_covariance_from_adam, get_pred_vars_optim, get_pred_vars_laplace
 
 
@@ -29,7 +29,7 @@ def get_args():
 
     # Data, Model
     parser.add_argument('--dataset', default='MNIST', choices=['MNIST', 'FMNIST', 'CIFAR10', 'MOON'])
-    parser.add_argument('--moon_noise', default = 0.2, help='desired noise for moon')
+    parser.add_argument('--moon_noise', default = 0.2, type=float, help='desired noise for moon')
     parser.add_argument('--model', default='lenet',choices=['large_mlp', 'lenet', 'small_mlp', 'cnn_deepobs'])
 
     # Optimization
@@ -204,11 +204,18 @@ if __name__ == "__main__":
     sensitivities = np.asarray(residuals) * np.asarray(lambdas) * np.asarray(vars)
     sensitivities = np.sum(np.abs(sensitivities), axis=-1)
 
-    scores_dict = {'X_train': ds_train.tensors[0],
-                   'y_train': ds_train.tensors[1],
-                   'sensitivities': sensitivities,
-                   'bpe': residuals_summary,
-                   'bls': lev_scores_summary}
+    if args.dataset == 'MOON':
+
+        scores_dict = {'X_train': ds_train.tensors[0],
+                    'y_train': ds_train.tensors[1],
+                    'sensitivities': sensitivities,
+                    'bpe': residuals_summary,
+                    'bls': lev_scores_summary}
+    else:
+        scores_dict = {'sensitivities': sensitivities,
+                    'bpe': residuals_summary,
+                    'bls': lev_scores_summary}
+
     
     dir = 'pickles/'
     os.makedirs(os.path.dirname(dir), exist_ok=True)
@@ -219,11 +226,12 @@ if __name__ == "__main__":
     ## NEXT PART IS TO IMPLEMENT LEAVE ONE OUT
 
     indices = np.arange(0, n_train, 1)
-    np.random.shuffle(indices)
+    #np.random.shuffle(indices)
     indices_retrain = indices[0:args.n_retrain]
 
     # Retrain with one example removed
     softmax_deviations = np.zeros((args.n_retrain, nc))
+    datapoint = []
     for i in tqdm.tqdm(list(range(args.n_retrain))):
         print('\nRemoved example ', i)
 
@@ -241,6 +249,9 @@ if __name__ == "__main__":
 
             # Use list comprehension to filter out the example
             ds_train_perturbed_list = [(x.tolist(), y) for x, y in ds_train if x.tolist() != X_removed]
+            ds_removed_list = [(x.tolist(), y.numpy()) for x, y in ds_train if x.tolist() == X_removed]
+            datapoint.append(ds_removed_list[0])
+            
             ds_train_perturbed = [(torch.tensor(x).to(device), torch.tensor(y).to(device)) for x, y in ds_train_perturbed_list]
 
             X_removed = torch.tensor(X_removed)
@@ -256,12 +267,13 @@ if __name__ == "__main__":
         # Learning rate scheduler
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=args.epochs, eta_min=args.lrmin_retrain)
 
-        net, losses = train_model(net, criterion, optim, scheduler, trainloader_retrain, args.epochs_retrain, n_train-1, args.delta, device, args.optimizer == 'adam')
+        #net, losses = train_model(net, criterion, optim, scheduler, trainloader_retrain, args.epochs_retrain, n_train-1, args.delta, device, args.optimizer == 'adam')
+        net, losses = train_network(net, trainloader_retrain, args.lr_retrain, args.lrmin_retrain, args.epochs_retrain, n_train-1, args.delta, device=device)
 
         net.eval()
         with torch.no_grad():
             if args.dataset == 'MOON':
-                X_removed = X_removed.unsqueeze(0)
+                X_removed = X_removed
                 logits_wminus = net(X_removed.to(device))
             elif device == 'cuda':
                 X_removed = transform_train(torch.asarray(ds_train.data[idx_removed]).numpy()).cuda()
