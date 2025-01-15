@@ -4,6 +4,8 @@ import pickle
 import argparse
 import numpy as np
 
+import matplotlib.pyplot as plt
+
 import tqdm
 
 import torch
@@ -30,22 +32,22 @@ def get_args():
     # Data, Model
     parser.add_argument('--dataset', default='MNIST', choices=['MNIST', 'FMNIST', 'CIFAR10', 'MOON'])
     parser.add_argument('--moon_noise', default = 0.2, type=float, help='desired noise for moon')
-    parser.add_argument('--model', default='lenet',choices=['large_mlp', 'lenet', 'small_mlp', 'cnn_deepobs'])
+    parser.add_argument('--model', default='lenet',choices=['large_mlp', 'lenet', 'small_mlp', 'cnn_deepobs', 'nn'])
 
     # Optimization
     parser.add_argument('--optimizer', default='iblr', choices=['iblr', 'adam'])
-    parser.add_argument('--lr', default=1e-2, type=float, help='learning rate')
-    parser.add_argument('--lrmin', default=1e-4, type=float, help='min learning rate of scheduler')
+    parser.add_argument('--lr', default=2, type=float, help='learning rate')
+    parser.add_argument('--lrmin', default=1e-3, type=float, help='min learning rate of scheduler')
     parser.add_argument('--bs', default=256, type=int, help='batch size')
-    parser.add_argument('--epochs', default=100, type=int, help='number of epochs')
+    parser.add_argument('--epochs', default=1000, type=int, help='number of epochs')
     parser.add_argument('--delta', default=60, type=float, help='L2-regularization parameter')
 
     # IBLR
     parser.add_argument('--hess_init', default=0.1, type=float, help='Hessian initialization')
 
     # Retraining
-    parser.add_argument('--lr_retrain', default=1e-3, type=float, help='retraining: learning rate')
-    parser.add_argument('--lrmin_retrain', default=1e-4, type=float, help='retraining: min learning rate scheduler')
+    parser.add_argument('--lr_retrain', default=2, type=float, help='retraining: learning rate')
+    parser.add_argument('--lrmin_retrain', default=1e-3, type=float, help='retraining: min learning rate scheduler')
     parser.add_argument('--epochs_retrain', default=300, type=int, help='retraining: number of epochs')
     parser.add_argument('--n_retrain', default=1000, type=int, help='number of retrained examples')
 
@@ -77,8 +79,11 @@ def train_one_epoch_sgd_adam(net, optim, device):
             optim.zero_grad()
             fs = net(X)
             loss_ = criterion(fs, y)
-            p_ = parameters_to_vector(net.parameters())
-            reg_ = 1/2 * args.delta * p_.square().sum()
+            if args.optimizer == 'adamw':
+                reg_ = 0
+            else:
+                p_ = parameters_to_vector(net.parameters())
+                reg_ = 1/2 * args.delta * p_.square().sum()
             loss = loss_ + (1/n_train)*reg_
             loss.backward()
             return loss, fs
@@ -95,7 +100,7 @@ def get_optimizer(retrain=False):
     if args.optimizer == 'adam':
         optim = Adam(net.parameters(), lr=lr, weight_decay=0)
     elif args.optimizer == 'iblr':
-        optim = IBLR(net.parameters(), lr=lr, mc_samples=1, ess=n_train, weight_decay=args.delta/n_train,
+        optim = IBLR(net.parameters(), lr=lr, mc_samples=4, ess=n_train, weight_decay=1e-3,
                       beta1=0.9, beta2=0.99999, hess_init=args.hess_init)
     else:
         raise NotImplementedError
@@ -132,7 +137,7 @@ if __name__ == "__main__":
     print('device', device)
 
     # Loss
-    criterion = nn.CrossEntropyLoss(reduction='mean').to(device)
+    criterion = nn.CrossEntropyLoss().to(device)
 
     # Data
     if args.dataset != 'MOON':
@@ -156,12 +161,11 @@ if __name__ == "__main__":
     trainloader_eval = DataLoader(ds_train, batch_size=args.bs, shuffle=False) # train evaluation
     testloader_eval = DataLoader(ds_test, batch_size=args.bs, shuffle=False) # test evaluation
     trainloader_vars = DataLoader(ds_train, batch_size=args.bs_jacs, shuffle=False) # variance computation
-
     # Optimizer
     optim = get_optimizer()
 
     # Learning rate scheduler
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=args.epochs, eta_min=args.lrmin)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=args.epochs)
 
     residual_upper, leverage_upper = 0.,0.
     test_nll_lst, loocv_lst = [], []
@@ -172,9 +176,11 @@ if __name__ == "__main__":
             net, optim = train_one_epoch_sgd_adam(net, optim, device)
 
         test_acc, test_nll = predict_test(net, testloader_eval, nc, te_targets, device)
+        #print(f"Test Acc: {(100 * test_acc):>0.2f}%, Test NLL: {test_nll:>6f}")
         test_nll_lst.append(test_nll)
 
         residuals, probs, logits, nll_hess, train_acc, train_nll = predict_nll_hess(net, trainloader_eval, nc, tr_targets, device)
+        #print(f"Train Acc: {(100 * train_acc):>0.2f}%, Train NLL: {train_nll:>6f}")
 
         vars, optim = get_prediction_vars(optim, device)
 
@@ -222,9 +228,7 @@ if __name__ == "__main__":
     with open(dir + args.name_exp + '_memory_maps_scores.pkl', 'wb') as f:
         pickle.dump(scores_dict, f, pickle.HIGHEST_PROTOCOL)
 
-
-    ## NEXT PART IS TO IMPLEMENT LEAVE ONE OUT
-
+    # Start of LOO experiment
     indices = np.arange(0, n_train, 1)
     #np.random.shuffle(indices)
     indices_retrain = indices[0:args.n_retrain]
@@ -267,13 +271,11 @@ if __name__ == "__main__":
         # Learning rate scheduler
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=args.epochs, eta_min=args.lrmin_retrain)
 
-        #net, losses = train_model(net, criterion, optim, scheduler, trainloader_retrain, args.epochs_retrain, n_train-1, args.delta, device, args.optimizer == 'adam')
-        net, losses = train_network(net, trainloader_retrain, args.lr_retrain, args.lrmin_retrain, args.epochs_retrain, n_train-1, args.delta, device=device)
+        net, losses = train_model(net, criterion, optim, scheduler, trainloader_retrain, args.epochs_retrain, n_train-1, _, device, args.optimizer == 'adam')
 
         net.eval()
         with torch.no_grad():
             if args.dataset == 'MOON':
-                X_removed = X_removed
                 logits_wminus = net(X_removed.to(device))
             elif device == 'cuda':
                 X_removed = transform_train(torch.asarray(ds_train.data[idx_removed]).numpy()).cuda()

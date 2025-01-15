@@ -12,6 +12,8 @@ def get_model(model_name, nc, input_size, device, seed):
     elif model_name == 'small_mlp':
         hidden_sizes = [32, 16]
         net = MLP(input_size, hidden_sizes, nc).to(device)
+    elif model_name == 'nn':
+        net = NeuralNetwork().to(device)
     elif model_name == 'lenet':
         net = LeNet5(output_size=nc).to(device)
     elif model_name == 'cnn_deepobs':
@@ -21,6 +23,20 @@ def get_model(model_name, nc, input_size, device, seed):
     else:
         raise NotImplementedError
     return net
+
+class NeuralNetwork(nn.Module):
+    def __init__(self):
+        super(NeuralNetwork, self).__init__()
+        self.relu = nn.Tanh()
+        self.layer1 = nn.Linear(2, 100)
+        self.layer2 = nn.Linear(100, 10)
+        self.layer3 = nn.Linear(10, 2)
+    def forward(self, x):
+        x = self.relu(self.layer1(x))
+        x = self.relu(self.layer2(x))
+        x = self.layer3(x)
+        return x
+
 
 class MLP(nn.Module):
     def __init__(self, input_size, hidden_sizes, output_size, activation="tanh", **kwargs):
@@ -34,7 +50,7 @@ class MLP(nn.Module):
 
         # Set activation function
         if activation == "relu":
-            self.act = torch.nn.ReLU
+            self.act = torch.nn.ReLU()
         elif activation == "tanh":
             self.act = torch.tanh
         elif activation == "sigmoid":

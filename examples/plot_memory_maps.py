@@ -20,10 +20,8 @@ if __name__ == "__main__":
 
     bpe = scores_dict['bpe']
     bls = scores_dict['bls']
-    X_train = scores_dict['X_train'].numpy()  # Assuming it's a tensor, convert to numpy
-    y_train = scores_dict['y_train'].numpy()  # Convert to numpy
 
-    # Plot 1: Bayesian Prediction Error vs Bayesian Leverage Score
+    # Plot Bayesian Prediction Error vs Bayesian Leverage Score
     fig, ax = plt.subplots()
 
     fontsize = 23
@@ -45,25 +43,5 @@ if __name__ == "__main__":
     os.makedirs(os.path.dirname(dir), exist_ok=True)
     plt.tight_layout()
     plt.savefig(dir + args.name_exp + '_memory_map.pdf', format="pdf")
-    plt.show()
-    plt.close()
-
-    # Plot 2: 2D Feature Visualization
-    fig, ax = plt.subplots()
-    
-    scatter = plt.scatter(X_train[:, 0], X_train[:, 1], c=y_train, cmap='viridis', s=10)
-    plt.colorbar(scatter, label='Class')
-
-    plt.xlabel('Feature 1', fontsize=fontsize)
-    plt.ylabel('Feature 2', fontsize=fontsize)
-    plt.xticks(fontsize=fontsize-2)
-    plt.yticks(fontsize=fontsize-2)
-    plt.grid(True, alpha=0.5)
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-
-    # Save second figure
-    plt.tight_layout()
-    plt.savefig(dir + args.name_exp + '_2d_features.pdf', format="pdf")
     plt.show()
     plt.close()

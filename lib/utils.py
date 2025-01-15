@@ -45,10 +45,7 @@ def train_model(net, criterion, optim, scheduler, trainloader, epochs, N, delta,
                 with optim.sampled_params(train=True):
                     optim.zero_grad()
                     fs=net(X)
-                    loss_ = criterion(fs, y)
-                    p_ = parameters_to_vector(net.parameters())
-                    reg_ = 1 / 2 * delta * p_.square().sum()
-                    loss = loss_ + (1/N) * reg_
+                    loss = criterion(fs, y)
                     loss.backward()
             else:
                 optim.zero_grad()
