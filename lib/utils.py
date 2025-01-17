@@ -33,7 +33,7 @@ def train_network(net, trainloader, lr, lrmin, epochs, N, delta, device):
 
     return net, losses
 
-def train_model(net, criterion, optim, scheduler, trainloader, epochs, N, delta, device, adam=False):
+def train_model(net, criterion, optim, scheduler, trainloader, epochs, N, delta, device, adam=False, return_optim=False):
     net.train()
 
     losses = []
@@ -59,7 +59,10 @@ def train_model(net, criterion, optim, scheduler, trainloader, epochs, N, delta,
             running_loss += loss.item()
         losses.append(running_loss)
         scheduler.step()
-    return net, losses
+    if not return_optim:
+        return net, losses
+    else:
+        return net, optim
 
 
 def get_estimated_nll(nc, residuals, vars, logits, all_targets, eps=1e-10, loco=False):
