@@ -5,7 +5,7 @@ import argparse
 import numpy as np
 
 def get_args():
-    parser = argparse.ArgumentParser(description='Plot memory maps')
+    parser = argparse.ArgumentParser(description='Plot memory maps and decision boundaries')
     parser.add_argument('--name_exp', default='mnist_mlp', type=str, help='name of experiment')
     return parser.parse_args()
 
@@ -27,12 +27,38 @@ if __name__ == "__main__":
         bpe = scores_dict['bpe']
         bls = scores_dict['bls']
 
-        # Plot Bayesian Prediction Error vs Bayesian Leverage Score for each epoch
+        # Check if decision boundary data is available
+        if 'decision_boundary' in scores_dict:
+            xx, yy, Z = scores_dict['decision_boundary']['xx'], scores_dict['decision_boundary']['yy'], scores_dict['decision_boundary']['Z']
+            X_train = scores_dict['X_train']
+            y_train = scores_dict['y_train']
+
+            # Plot decision boundary
+            fig, ax = plt.subplots()
+            plt.contourf(xx, yy, Z, alpha=0.8, cmap=plt.cm.coolwarm)
+            scatter = plt.scatter(X_train[:, 0], X_train[:, 1], c=y_train, cmap=plt.cm.coolwarm, edgecolor='k')
+            plt.title(f"Decision Boundary at Epoch {epoch}", fontsize=fontsize)
+            plt.xlabel('Feature 1', fontsize=fontsize)
+            plt.ylabel('Feature 2', fontsize=fontsize)
+            plt.colorbar(scatter, ax=ax, label='Class')
+            plt.xticks(fontsize=fontsize - 2)
+            plt.yticks(fontsize=fontsize - 2)
+
+            # Save the decision boundary plot
+            decision_boundary_filename = os.path.join(dir, f"{args.name_exp}_decision_boundary_epoch_{epoch}.pdf")
+            plt.tight_layout()
+            plt.savefig(decision_boundary_filename, format="pdf")
+            plt.show()
+            plt.close()
+
+            print(f"Saved decision boundary plot for epoch {epoch} to {decision_boundary_filename}")
+
+        # Plot Bayesian Prediction Error vs Bayesian Leverage Score
         fig, ax = plt.subplots()
         plt.ylabel('Bayesian Prediction Error', fontsize=fontsize, labelpad=15)
         plt.xlabel('Bayesian Leverage Score', fontsize=fontsize)
-        plt.yticks(fontsize=fontsize-2)
-        plt.xticks(fontsize=fontsize-2)
+        plt.yticks(fontsize=fontsize - 2)
+        plt.xticks(fontsize=fontsize - 2)
         ax.yaxis.set_major_locator(plt.MaxNLocator(3))
         ax.xaxis.set_major_locator(plt.MaxNLocator(5))
         plt.tick_params(axis='both', which='major', labelcolor='gray')
@@ -42,11 +68,11 @@ if __name__ == "__main__":
 
         plt.scatter(bls, bpe, edgecolor='r', facecolor='w', marker=".", s=75)
 
-        # Save the figure for the current epoch
-        plot_filename = os.path.join(dir, f"{args.name_exp}_evolving_memory_map_epoch_{epoch}.pdf")
+        # Save the BPE vs. BLS plot
+        memory_map_filename = os.path.join(dir, f"{args.name_exp}_evolving_memory_map_epoch_{epoch}.pdf")
         plt.tight_layout()
-        plt.savefig(plot_filename, format="pdf")
+        plt.savefig(memory_map_filename, format="pdf")
         plt.show()
         plt.close()
 
-        print(f"Saved plot for epoch {epoch} to {plot_filename}")
+        print(f"Saved memory map plot for epoch {epoch} to {memory_map_filename}")

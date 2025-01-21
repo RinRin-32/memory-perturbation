@@ -27,35 +27,35 @@ def get_args():
     parser = argparse.ArgumentParser(description='Plotting Sensitivity over Epoch')
 
     # Experiment
-    parser.add_argument('--name_exp', default='mnist_lenet_ibr', type=str, help='name of experiment')
+    parser.add_argument('--name_exp', default='visualizer', type=str, help='name of experiment')
 
     # Data, Model
-    parser.add_argument('--dataset', default='MNIST', choices=['MNIST', 'FMNIST', 'CIFAR10', 'MOON'])
+    parser.add_argument('--dataset', default='MOON', choices=['MNIST', 'FMNIST', 'CIFAR10', 'MOON'])
     parser.add_argument('--moon_noise', default = 0.2, type=float, help='desired noise for moon')
-    parser.add_argument('--model', default='lenet',choices=['large_mlp', 'lenet', 'small_mlp', 'cnn_deepobs', 'nn'])
+    parser.add_argument('--model', default='small_mlp',choices=['large_mlp', 'lenet', 'small_mlp', 'cnn_deepobs', 'nn'])
 
     # Optimization
     parser.add_argument('--optimizer', default='iblr', choices=['iblr', 'adam'])
     parser.add_argument('--lr', default=2, type=float, help='learning rate')
-    parser.add_argument('--lrmin', default=1e-3, type=float, help='min learning rate of scheduler')
+    parser.add_argument('--lrmin', default=0.0, type=float, help='min learning rate of scheduler')
     parser.add_argument('--bs', default=256, type=int, help='batch size')
-    parser.add_argument('--epochs', default=1000, type=int, help='number of epochs')
+    parser.add_argument('--epochs', default=30, type=int, help='number of epochs')
     parser.add_argument('--delta', default=60, type=float, help='L2-regularization parameter')
 
     # IBLR
-    parser.add_argument('--hess_init', default=0.1, type=float, help='Hessian initialization')
+    parser.add_argument('--hess_init', default=0.9, type=float, help='Hessian initialization')
 
     # Retraining
     parser.add_argument('--lr_retrain', default=2, type=float, help='retraining: learning rate')
-    parser.add_argument('--lrmin_retrain', default=1e-3, type=float, help='retraining: min learning rate scheduler')
-    parser.add_argument('--epochs_retrain', default=1000, type=int, help='retraining: number of epochs')
-    parser.add_argument('--n_retrain', default=1000, type=int, help='number of retrained examples')
+    parser.add_argument('--lrmin_retrain', default=0.0, type=float, help='retraining: min learning rate scheduler')
+    parser.add_argument('--epochs_retrain', default=30, type=int, help='retraining: number of epochs')
+    parser.add_argument('--n_retrain', default=800, type=int, help='number of retrained examples')
 
     # Variance computation
     parser.add_argument('--bs_jacs', default=50, type=int, help='Jacobian batch size for variance computation')
 
     # Epoch step
-    parser.add_argument('--epochs_step', default=10, type=int, help='How many epoch till logging of sensitivity')
+    parser.add_argument('--epochs_step', default=1, type=int, help='How many epoch till logging of sensitivity')
 
     return parser.parse_args()
 
@@ -71,6 +71,7 @@ def train_one_epoch_iblr(net, optim, device):
             loss.backward()
         optim.step()
         running_loss += loss.item()
+        ## will have to insert bpe bls and sensitivity calculation
     scheduler.step()
     return net, optim
 
