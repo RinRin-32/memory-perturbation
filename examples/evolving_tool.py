@@ -72,6 +72,7 @@ def train_one_epoch_iblr(net, optim, device):
         optim.step()
         running_loss += loss.item()
         ## will have to insert bpe bls and sensitivity calculation
+
     scheduler.step()
     return net, optim
 
@@ -199,73 +200,87 @@ if __name__ == "__main__":
     test_nll_lst, loocv_lst = [], []
     all_scores = {}
     all_prob = []
+    curr = 0
 
     for epoch in tqdm.tqdm(list(range(args.epochs+1))):
         if args.optimizer == 'iblr':
-            net, optim = train_one_epoch_iblr(net, optim, device)
+            #net, optim = train_one_epoch_iblr(net, optim, device, epoch, len(ds_train))
+            net.train()
+            running_loss = 0
+            for X, y in trainloader:
+                X, y = X.to(device), y.to(device)
+                with optim.sampled_params(train=True):
+                    optim.zero_grad()
+                    fs = net(X)
+                    loss = criterion(fs, y)
+                    loss.backward()
+                optim.step()
+                running_loss += loss.item()
+                test_acc, test_nll = predict_test(net, testloader_eval, nc, te_targets, device)
+                test_nll_lst.append(test_nll)
+                residuals, probs, logits, nll_hess, train_acc, train_nll = predict_nll_hess(net, trainloader_eval, nc, tr_targets, device)
+
+                vars, optim = get_prediction_vars(optim, device)
+
+                # Evaluate memory map criteria
+                residuals_summary = torch.sqrt(torch.sum(residuals**2, dim=1)).detach().numpy()  # l2norm
+                lev_scores_full = torch.einsum('nij,nji->ni', vars, nll_hess)
+                lev_scores_full = torch.clamp(lev_scores_full, 0.)
+                lev_scores_summary = torch.sqrt(torch.sum(lev_scores_full**2, dim=1)).cpu().detach().numpy()
+
+                leverage_upper = max(lev_scores_summary.max(), leverage_upper)
+                residual_upper = max(residuals_summary.max(), residual_upper)
+
+                if epoch % args.epochs_step == 0:  # Save every `epochs_step` epochs
+                    # Evaluate on training data; residuals and lambdas
+                    residuals, probs, lambdas, train_acc, train_nll = predict_train2(net, trainloader_eval, nc, tr_targets, device)
+                    print(f"Train Acc: {(100 * train_acc):>0.2f}%, Train NLL: {train_nll:>6f}")
+
+                    # Evaluate on test data
+                    test_acc, test_nll = predict_test(net, testloader_eval, nc, te_targets, device)
+                    print(f"Test Acc: {(100 * test_acc):>0.2f}%, Test NLL: {test_nll:>6f}")
+
+                    # Compute prediction variances
+                    vars = get_pred_vars_laplace(net, trainloader_vars, args.delta, nc, device, version='kfac')
+
+                    # Compute and store sensitivities
+                    sensitivities = np.asarray(residuals) * np.asarray(lambdas) * np.asarray(vars)
+                    sensitivities = np.sum(np.abs(sensitivities), axis=-1)
+
+                    all_prob.append(probs)
+
+                    if args.dataset == 'MOON':
+                        xx, yy, Z = plot_decision_boundary(net, ds_train[:][0], device)
+                        decision_boundary = {"xx": xx, "yy": yy, "Z": Z}
+
+                        scores_dict = {'X_train': ds_train.tensors[0],
+                                    'y_train': ds_train.tensors[1],
+                                    'sensitivities': sensitivities,
+                                    'bpe': residuals_summary,
+                                    'bls': lev_scores_summary,
+                                    'decision_boundary': decision_boundary}
+                    else:
+                        scores_dict = {'sensitivities': sensitivities,
+                                    'bpe': residuals_summary,
+                                    'bls': lev_scores_summary}
+
+                    # Append scores_dict to all_scores with the epoch as the key
+                    all_scores[curr] = scores_dict
+                    curr += 1
+
+                    # Save all_scores to a pickle file
+                    dir = 'pickles/'
+                    os.makedirs(os.path.dirname(dir), exist_ok=True)
+                    with open(os.path.join(dir, f"{args.name_exp}_evolving_memory_maps_scores.pkl"), 'wb') as f:
+                        pickle.dump(all_scores, f, pickle.HIGHEST_PROTOCOL)
+                scheduler.step()
         else:
-            net, optim = train_one_epoch_sgd_adam(net, optim, device)
-
-        test_acc, test_nll = predict_test(net, testloader_eval, nc, te_targets, device)
-        test_nll_lst.append(test_nll)
-        residuals, probs, logits, nll_hess, train_acc, train_nll = predict_nll_hess(net, trainloader_eval, nc, tr_targets, device)
-
-        vars, optim = get_prediction_vars(optim, device)
-
-        # Evaluate memory map criteria
-        residuals_summary = torch.sqrt(torch.sum(residuals**2, dim=1)).detach().numpy()  # l2norm
-        lev_scores_full = torch.einsum('nij,nji->ni', vars, nll_hess)
-        lev_scores_full = torch.clamp(lev_scores_full, 0.)
-        lev_scores_summary = torch.sqrt(torch.sum(lev_scores_full**2, dim=1)).cpu().detach().numpy()
-
-        leverage_upper = max(lev_scores_summary.max(), leverage_upper)
-        residual_upper = max(residuals_summary.max(), residual_upper)
-
-        if epoch % args.epochs_step == 0:  # Save every `epochs_step` epochs
-            # Evaluate on training data; residuals and lambdas
-            residuals, probs, lambdas, train_acc, train_nll = predict_train2(net, trainloader_eval, nc, tr_targets, device)
-            print(f"Train Acc: {(100 * train_acc):>0.2f}%, Train NLL: {train_nll:>6f}")
-
-            # Evaluate on test data
-            test_acc, test_nll = predict_test(net, testloader_eval, nc, te_targets, device)
-            print(f"Test Acc: {(100 * test_acc):>0.2f}%, Test NLL: {test_nll:>6f}")
-
-            # Compute prediction variances
-            vars = get_pred_vars_laplace(net, trainloader_vars, args.delta, nc, device, version='kfac')
-
-            # Compute and store sensitivities
-            sensitivities = np.asarray(residuals) * np.asarray(lambdas) * np.asarray(vars)
-            sensitivities = np.sum(np.abs(sensitivities), axis=-1)
-
-            all_prob.append(probs)
-
-            if args.dataset == 'MOON':
-                xx, yy, Z = plot_decision_boundary(net, ds_train[:][0], device)
-                decision_boundary = {"xx": xx, "yy": yy, "Z": Z}
-
-                scores_dict = {'X_train': ds_train.tensors[0],
-                            'y_train': ds_train.tensors[1],
-                            'sensitivities': sensitivities,
-                            'bpe': residuals_summary,
-                            'bls': lev_scores_summary,
-                            'decision_boundary': decision_boundary}
-            else:
-                scores_dict = {'sensitivities': sensitivities,
-                            'bpe': residuals_summary,
-                            'bls': lev_scores_summary}
-
-            # Append scores_dict to all_scores with the epoch as the key
-            all_scores[epoch//args.epochs_step] = scores_dict
-
-            # Save all_scores to a pickle file
-            dir = 'pickles/'
-            os.makedirs(os.path.dirname(dir), exist_ok=True)
-            with open(os.path.join(dir, f"{args.name_exp}_evolving_memory_maps_scores.pkl"), 'wb') as f:
-                pickle.dump(all_scores, f, pickle.HIGHEST_PROTOCOL)
+            net, optim = train_one_epoch_sgd_adam(net, optim, device, epoch, len(ds_train))
     
     w_star = parameters_to_vector(net.parameters()).detach().cpu().clone()
 
     retrain = {}
+    curr = 0
 
     for step in tqdm.tqdm(list(range(int(args.epochs//args.epochs_step)+1))):
         # Start of LOO experiment
@@ -311,33 +326,63 @@ if __name__ == "__main__":
             # Learning rate scheduler
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=step+1, eta_min=args.lrmin_retrain)
 
-            net, losses = train_model(net, criterion, optim, scheduler, trainloader_retrain, step+1, n_train-1, None, device, args.optimizer == 'adam')
+            #net, losses = train_model(net, criterion, optim, scheduler, trainloader_retrain, step+1, n_train-1, None, device, args.optimizer == 'adam')
+            #write a training loop here instead
+            for epoch in range(step+1):
+                net.train()
+                losses = []
+                for _ in range(epoch):
+                    running_loss = 0
+                    for X, y in trainloader_retrain:
+                        X, y = X.to(device).float(), y.to(device)
+                        if args.optimizer != 'adam':
+                            with optim.sampled_params(train=True):
+                                optim.zero_grad()
+                                fs=net(X)
+                                loss = criterion(fs, y)
+                                loss.backward()
+                        else:
+                            optim.zero_grad()
+                            fs=net(X)
+                            loss_ = criterion(fs, y)
+                            p_ = parameters_to_vector(net.parameters())
+                            reg_ = 1 / 2 * args.delta * p_.square().sum()
+                            loss = loss_ + (1/n_train-1) * reg_
+                            loss.backward()
+                        optim.step()
+                        running_loss += loss.item()
+                    losses.append(running_loss)
+                    net.eval()
+                    with torch.no_grad():
+                        if args.dataset == 'MOON':
+                            logits_wminus = net(X_removed.to(device))
+                        elif device == 'cuda':
+                            X_removed = transform_train(torch.asarray(ds_train.data[idx_removed]).numpy()).cuda()
+                            logits_wminus = net(X_removed.expand((1, -1, -1, -1)).to(device))
+                        else:
+                            X_removed = transform_train(torch.asarray(ds_train.data[idx_removed]).numpy())
+                            logits_wminus = net(X_removed.expand((1, -1, -1, -1)).to(device))
+                        probs_wminus = torch.softmax(logits_wminus, dim=-1).cpu().numpy()
+                        #raise RuntimeError(f'shape of softmax: {softmax_deviations[i].shape}{softmax_deviations.dtype} shape of all prob: {all_prob[curr][idx_removed].shape} {all_prob[curr][idx_removed].dtype}')
+                        #raise RuntimeError(f'probs_wminus: {probs_wminus.shape} {probs_wminus} {all_prob[curr][idx_removed].shape} {softmax_deviations[i].shape}')
+                        #raise RuntimeError(f"{softmax_deviations[i].shape} {(probs_wminus - all_prob[curr][idx_removed]).shape}")
+                        #softmax_deviations[i] = probs_wminus - all_prob[curr][idx_removed]
+                        raise RuntimeError((all_prob[curr][idx_removed])[0])
 
-            ## will have to move this into calculation within train_model somehow
-            net.eval()
-            with torch.no_grad():
-                if args.dataset == 'MOON':
-                    logits_wminus = net(X_removed.to(device))
-                elif device == 'cuda':
-                    X_removed = transform_train(torch.asarray(ds_train.data[idx_removed]).numpy()).cuda()
-                    logits_wminus = net(X_removed.expand((1, -1, -1, -1)).to(device))
-                else:
-                    X_removed = transform_train(torch.asarray(ds_train.data[idx_removed]).numpy())
-                    logits_wminus = net(X_removed.expand((1, -1, -1, -1)).to(device))
-                probs_wminus = torch.softmax(logits_wminus, dim=-1).cpu().numpy()
-                softmax_deviations[i] = probs_wminus - all_prob[step][idx_removed]
+                    # L1-norm
+                    softmax_deviations = np.sum(np.abs(softmax_deviations), axis=-1)
 
-        # L1-norm
-        softmax_deviations = np.sum(np.abs(softmax_deviations), axis=-1)
+                    # Save softmax deviations by removing an example and retraining (baseline)
+                    retrain_dict = {'indices_retrain': indices_retrain,
+                                    'softmax_deviations': softmax_deviations,
+                                    }
+                    retrain[curr] = retrain_dict
 
-        # Save softmax deviations by removing an example and retraining (baseline)
-        retrain_dict = {'indices_retrain': indices_retrain,
-                        'softmax_deviations': softmax_deviations,
-                        }
-        retrain[step] = retrain_dict
+                    curr += 1
 
-        # Save all_scores to a pickle file
-        dir = 'pickles/'
-        os.makedirs(os.path.dirname(dir), exist_ok=True)
-        with open(os.path.join(dir, f"{args.name_exp}_evolving_memory_maps_retrain.pkl"), 'wb') as f:
-            pickle.dump(retrain, f, pickle.HIGHEST_PROTOCOL)
+                    # Save all_scores to a pickle file
+                    dir = 'pickles/'
+                    os.makedirs(os.path.dirname(dir), exist_ok=True)
+                    with open(os.path.join(dir, f"{args.name_exp}_evolving_memory_maps_retrain.pkl"), 'wb') as f:
+                        pickle.dump(retrain, f, pickle.HIGHEST_PROTOCOL)
+                    scheduler.step()
