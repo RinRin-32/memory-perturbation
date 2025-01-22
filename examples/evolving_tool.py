@@ -198,6 +198,7 @@ if __name__ == "__main__":
     residual_upper, leverage_upper = 0.,0.
     test_nll_lst, loocv_lst = [], []
     all_scores = {}
+    all_prob = []
 
     for epoch in tqdm.tqdm(list(range(args.epochs+1))):
         if args.optimizer == 'iblr':
@@ -235,6 +236,8 @@ if __name__ == "__main__":
             # Compute and store sensitivities
             sensitivities = np.asarray(residuals) * np.asarray(lambdas) * np.asarray(vars)
             sensitivities = np.sum(np.abs(sensitivities), axis=-1)
+
+            all_prob.append(probs)
 
             if args.dataset == 'MOON':
                 xx, yy, Z = plot_decision_boundary(net, ds_train[:][0], device)
@@ -306,10 +309,11 @@ if __name__ == "__main__":
             criterion = nn.CrossEntropyLoss(reduction='mean').to(device)
             optim = get_optimizer()
             # Learning rate scheduler
-            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=args.epochs, eta_min=args.lrmin_retrain)
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=step+1, eta_min=args.lrmin_retrain)
 
-            net, losses = train_model(net, criterion, optim, scheduler, trainloader_retrain, args.epochs_retrain, n_train-1, None, device, args.optimizer == 'adam')
+            net, losses = train_model(net, criterion, optim, scheduler, trainloader_retrain, step+1, n_train-1, None, device, args.optimizer == 'adam')
 
+            ## will have to move this into calculation within train_model somehow
             net.eval()
             with torch.no_grad():
                 if args.dataset == 'MOON':
@@ -321,7 +325,7 @@ if __name__ == "__main__":
                     X_removed = transform_train(torch.asarray(ds_train.data[idx_removed]).numpy())
                     logits_wminus = net(X_removed.expand((1, -1, -1, -1)).to(device))
                 probs_wminus = torch.softmax(logits_wminus, dim=-1).cpu().numpy()
-                softmax_deviations[i] = probs_wminus - probs[idx_removed]
+                softmax_deviations[i] = probs_wminus - all_prob[step][idx_removed]
 
         # L1-norm
         softmax_deviations = np.sum(np.abs(softmax_deviations), axis=-1)
