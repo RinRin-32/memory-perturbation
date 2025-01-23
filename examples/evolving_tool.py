@@ -98,26 +98,6 @@ def train_one_epoch_sgd_adam(net, optim, device):
     scheduler.step()
     return net, optim
 
-def train_single_step(net, criterion, optim, X, y, args, device):
-    """Train the model for a single step and return the loss."""
-    X, y = X.to(device).float(), y.to(device)
-    if args.optimizer == "adam":
-        optim.zero_grad()
-        fs=net(X)
-        loss_ = criterion(fs, y)
-        p_ = parameters_to_vector(net.parameters())
-        reg_ = 1 / 2 * args.delta * p_.square().sum()
-        loss = loss_ + (1/args.n_train) * reg_
-        loss.backward()
-    else:
-        with optim.sampled_params(train=True):
-            optim.zero_grad()
-            fs=net(X)
-            loss = criterion(fs,y)
-            loss.backward()
-    optim.step()
-    return loss.item()
-
 def get_optimizer(retrain=False):
     if retrain:
         lr = args.lr_retrain
@@ -301,15 +281,16 @@ if __name__ == "__main__":
 
     retrain = {}
 
-    pos = 0
-
     for step in tqdm.tqdm(range(args.epochs)):
         # Start of LOO experiment
         indices = np.arange(0, n_train)
         indices_retrain = indices[:args.n_retrain]
-        curr = step * args.bs
 
         datapoint = []
+
+        # Initialize softmax_deviations
+        softmax_deviations = np.zeros((args.n_retrain, nc))
+        
         for i in tqdm.tqdm(range(args.n_retrain)):
             vector_to_parameters(w_star, net.parameters())
             net = net.to(device)
@@ -351,19 +332,19 @@ if __name__ == "__main__":
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
                 optim, T_max=step + 1, eta_min=args.lrmin_retrain
             )
+            curr = 0
 
-            # Initialize softmax_deviations
-            softmax_deviations = np.zeros((args.n_retrain, nc))  # Ensure correct shape
-
-            for epoch in range(step):
+            for epoch in range(step+1):
                 net.train()
-                for X_batch, y_batch in trainloader_retrain:
-                    # Perform one training step
-                    loss = train_single_step(
-                        net, criterion, optim, X_batch, y_batch, args, device
-                    )
+                for X, y in trainloader_retrain:
+                    X, y = X.to(device), y.to(device)
+                    with optim.sampled_params(train=True):
+                        optim.zero_grad()
+                        fs = net(X)
+                        loss = criterion(fs, y)
+                        loss.backward()
+                    optim.step()
 
-                    # Compute softmax deviations *during training*
                     net.eval()
                     with torch.no_grad():
                         if args.dataset == "MOON":
@@ -381,33 +362,34 @@ if __name__ == "__main__":
 
                         probs_wminus = torch.softmax(logits_wminus, dim=-1).cpu().numpy()
 
-                        try:
-                            softmax_deviations[i] = probs_wminus.flatten() - all_prob[pos][idx_removed]
-                        except:
-                            raise RuntimeError(f'{i}, {curr}, {len(all_prob)}')
+                        if epoch == (step-1):
+                            try:
+                                #128 = 32 * 4, 32 epoch 4 batch, first epoch 0-3
+                                pos = (curr%args.bs)%4 + 4*(step-1)
+                                #print(f'{pos} {step} {epoch}')
+                                softmax_deviations[i] = probs_wminus.flatten() - all_prob[pos][idx_removed]
+                                curr += 1
+                                # L1-norm of softmax deviations across classes
+                                l1_norms = np.sum(np.abs(softmax_deviations), axis=-1)
 
-                # L1-norm of softmax deviations across classes
-                l1_norms = np.sum(np.abs(softmax_deviations), axis=-1)
+                                # Save deviations and metadata after every step
+                                retrain_dict = {
+                                    "indices_retrain": indices_retrain,
+                                    "softmax_deviations": l1_norms,  # Use L1 norms
+                                }
+                                retrain[pos] = retrain_dict
 
-                # Save deviations and metadata after every step
-                retrain_dict = {
-                    "indices_retrain": indices_retrain,
-                    "softmax_deviations": l1_norms,  # Use L1 norms
-                }
-                pos = curr//args.bs
-                retrain[pos] = retrain_dict
-                curr+=1
-
-                # Save results to a pickle file
-                dir = "pickles/"
-                os.makedirs(dir, exist_ok=True)
-                with open(
-                    os.path.join(
-                        dir, f"{args.name_exp}_evolving_memory_maps_retrain.pkl"
-                    ),
-                    "wb",
-                ) as f:
-                    pickle.dump(retrain, f, pickle.HIGHEST_PROTOCOL)
-
-            # Adjust learning rate scheduler per epoch
-            scheduler.step()
+                                # Save results to a pickle file
+                                dir = "pickles/"
+                                os.makedirs(dir, exist_ok=True)
+                                with open(
+                                    os.path.join(
+                                        dir, f"{args.name_exp}_evolving_memory_maps_retrain.pkl"
+                                    ),
+                                    "wb",
+                                ) as f:
+                                    pickle.dump(retrain, f, pickle.HIGHEST_PROTOCOL)
+                            except:
+                                raise RuntimeError(f'{i}, {curr}, {len(all_prob)}, {pos}')
+                    
+                    scheduler.step()
