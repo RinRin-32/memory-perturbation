@@ -98,6 +98,26 @@ def train_one_epoch_sgd_adam(net, optim, device):
     scheduler.step()
     return net, optim
 
+def train_single_step(net, criterion, optim, X, y, args, device):
+    """Train the model for a single step and return the loss."""
+    X, y = X.to(device).float(), y.to(device)
+    if args.optimizer == "adam":
+        optim.zero_grad()
+        fs=net(X)
+        loss_ = criterion(fs, y)
+        p_ = parameters_to_vector(net.parameters())
+        reg_ = 1 / 2 * args.delta * p_.square().sum()
+        loss = loss_ + (1/args.n_train) * reg_
+        loss.backward()
+    else:
+        with optim.sampled_params(train=True):
+            optim.zero_grad()
+            fs=net(X)
+            loss = criterion(fs,y)
+            loss.backward()
+    optim.step()
+    return loss.item()
+
 def get_optimizer(retrain=False):
     if retrain:
         lr = args.lr_retrain
@@ -202,7 +222,7 @@ if __name__ == "__main__":
     all_prob = []
     curr = 0
 
-    for epoch in tqdm.tqdm(list(range(args.epochs+1))):
+    for epoch in tqdm.tqdm(list(range(args.epochs))):
         if args.optimizer == 'iblr':
             #net, optim = train_one_epoch_iblr(net, optim, device, epoch, len(ds_train))
             net.train()
@@ -280,109 +300,114 @@ if __name__ == "__main__":
     w_star = parameters_to_vector(net.parameters()).detach().cpu().clone()
 
     retrain = {}
-    curr = 0
 
-    for step in tqdm.tqdm(list(range(int(args.epochs//args.epochs_step)+1))):
+    pos = 0
+
+    for step in tqdm.tqdm(range(args.epochs)):
         # Start of LOO experiment
-        indices = np.arange(0, n_train, 1)
-        #np.random.shuffle(indices)
-        indices_retrain = indices[0:args.n_retrain]
+        indices = np.arange(0, n_train)
+        indices_retrain = indices[:args.n_retrain]
+        curr = step * args.bs
 
-        # Retrain with one example removed
-        softmax_deviations = np.zeros((args.n_retrain, nc))
         datapoint = []
-        for i in tqdm.tqdm(list(range(args.n_retrain))):
-            #print('\nRemoved example ', i)
-
-            # Warmstarting
+        for i in tqdm.tqdm(range(args.n_retrain)):
             vector_to_parameters(w_star, net.parameters())
             net = net.to(device)
 
             # Remove one example from training set
             idx_removed = indices_retrain[i]
-            idx_remain = np.setdiff1d(np.arange(0, n_train, 1), idx_removed)
+            idx_remain = np.setdiff1d(np.arange(0, n_train), idx_removed)
 
-            if args.dataset == 'MOON':
-                # Extract the input tensor of the example to remove, convert to a list for comparison
-                X_removed = ds_train[idx_removed][0].tolist()  # Flatten the tensor to a list for comparison
-
-                # Use list comprehension to filter out the example
-                ds_train_perturbed_list = [(x.tolist(), y) for x, y in ds_train if x.tolist() != X_removed]
-                ds_removed_list = [(x.tolist(), y.numpy()) for x, y in ds_train if x.tolist() == X_removed]
+            if args.dataset == "MOON":
+                X_removed = ds_train[idx_removed][0].tolist()
+                ds_train_perturbed_list = [
+                    (x.tolist(), y)
+                    for x, y in ds_train
+                    if x.tolist() != X_removed
+                ]
+                ds_removed_list = [
+                    (x.tolist(), y.numpy())
+                    for x, y in ds_train
+                    if x.tolist() == X_removed
+                ]
                 datapoint.append(ds_removed_list[0])
-                
-                ds_train_perturbed = [(torch.tensor(x).to(device), torch.tensor(y).to(device)) for x, y in ds_train_perturbed_list]
+
+                ds_train_perturbed = [
+                    (torch.tensor(x).to(device), torch.tensor(y).to(device))
+                    for x, y in ds_train_perturbed_list
+                ]
 
                 X_removed = torch.tensor(X_removed)
             else:
-                # For other datasets (like MNIST, CIFAR10), you can use the default removal
                 ds_train_perturbed = Subset(ds_train, idx_remain)
-            
-            trainloader_retrain = get_quick_loader(DataLoader(ds_train_perturbed, batch_size=args.bs, shuffle=True), device=device)
 
-            # Retraining
-            criterion = nn.CrossEntropyLoss(reduction='mean').to(device)
+            trainloader_retrain = get_quick_loader(
+                DataLoader(ds_train_perturbed, batch_size=args.bs, shuffle=False), device=device
+            )
+
+            # Retrain model
+            criterion = nn.CrossEntropyLoss(reduction="mean").to(device)
             optim = get_optimizer()
-            # Learning rate scheduler
-            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=step+1, eta_min=args.lrmin_retrain)
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optim, T_max=step + 1, eta_min=args.lrmin_retrain
+            )
 
-            #net, losses = train_model(net, criterion, optim, scheduler, trainloader_retrain, step+1, n_train-1, None, device, args.optimizer == 'adam')
-            #write a training loop here instead
-            for epoch in range(step+1):
+            # Initialize softmax_deviations
+            softmax_deviations = np.zeros((args.n_retrain, nc))  # Ensure correct shape
+
+            for epoch in range(step):
                 net.train()
-                losses = []
-                for _ in range(epoch):
-                    running_loss = 0
-                    for X, y in trainloader_retrain:
-                        X, y = X.to(device).float(), y.to(device)
-                        if args.optimizer != 'adam':
-                            with optim.sampled_params(train=True):
-                                optim.zero_grad()
-                                fs=net(X)
-                                loss = criterion(fs, y)
-                                loss.backward()
-                        else:
-                            optim.zero_grad()
-                            fs=net(X)
-                            loss_ = criterion(fs, y)
-                            p_ = parameters_to_vector(net.parameters())
-                            reg_ = 1 / 2 * args.delta * p_.square().sum()
-                            loss = loss_ + (1/n_train-1) * reg_
-                            loss.backward()
-                        optim.step()
-                        running_loss += loss.item()
-                    losses.append(running_loss)
+                for X_batch, y_batch in trainloader_retrain:
+                    # Perform one training step
+                    loss = train_single_step(
+                        net, criterion, optim, X_batch, y_batch, args, device
+                    )
+
+                    # Compute softmax deviations *during training*
                     net.eval()
                     with torch.no_grad():
-                        if args.dataset == 'MOON':
+                        if args.dataset == "MOON":
                             logits_wminus = net(X_removed.to(device))
-                        elif device == 'cuda':
-                            X_removed = transform_train(torch.asarray(ds_train.data[idx_removed]).numpy()).cuda()
-                            logits_wminus = net(X_removed.expand((1, -1, -1, -1)).to(device))
                         else:
-                            X_removed = transform_train(torch.asarray(ds_train.data[idx_removed]).numpy())
+                            if device == "cuda":
+                                X_removed = transform_train(
+                                    torch.asarray(ds_train.data[idx_removed]).numpy()
+                                ).cuda()
+                            else:
+                                X_removed = transform_train(
+                                    torch.asarray(ds_train.data[idx_removed]).numpy()
+                                )
                             logits_wminus = net(X_removed.expand((1, -1, -1, -1)).to(device))
+
                         probs_wminus = torch.softmax(logits_wminus, dim=-1).cpu().numpy()
-                        #raise RuntimeError(f'shape of softmax: {softmax_deviations[i].shape}{softmax_deviations.dtype} shape of all prob: {all_prob[curr][idx_removed].shape} {all_prob[curr][idx_removed].dtype}')
-                        #raise RuntimeError(f'probs_wminus: {probs_wminus.shape} {probs_wminus} {all_prob[curr][idx_removed].shape} {softmax_deviations[i].shape}')
-                        #raise RuntimeError(f"{softmax_deviations[i].shape} {(probs_wminus - all_prob[curr][idx_removed]).shape}")
-                        #softmax_deviations[i] = probs_wminus - all_prob[curr][idx_removed]
-                        raise RuntimeError((all_prob[curr][idx_removed])[0])
 
-                    # L1-norm
-                    softmax_deviations = np.sum(np.abs(softmax_deviations), axis=-1)
+                        try:
+                            softmax_deviations[i] = probs_wminus.flatten() - all_prob[pos][idx_removed]
+                        except:
+                            raise RuntimeError(f'{i}, {curr}, {len(all_prob)}')
 
-                    # Save softmax deviations by removing an example and retraining (baseline)
-                    retrain_dict = {'indices_retrain': indices_retrain,
-                                    'softmax_deviations': softmax_deviations,
-                                    }
-                    retrain[curr] = retrain_dict
+                # L1-norm of softmax deviations across classes
+                l1_norms = np.sum(np.abs(softmax_deviations), axis=-1)
 
-                    curr += 1
+                # Save deviations and metadata after every step
+                retrain_dict = {
+                    "indices_retrain": indices_retrain,
+                    "softmax_deviations": l1_norms,  # Use L1 norms
+                }
+                pos = curr//args.bs
+                retrain[pos] = retrain_dict
+                curr+=1
 
-                    # Save all_scores to a pickle file
-                    dir = 'pickles/'
-                    os.makedirs(os.path.dirname(dir), exist_ok=True)
-                    with open(os.path.join(dir, f"{args.name_exp}_evolving_memory_maps_retrain.pkl"), 'wb') as f:
-                        pickle.dump(retrain, f, pickle.HIGHEST_PROTOCOL)
-                    scheduler.step()
+                # Save results to a pickle file
+                dir = "pickles/"
+                os.makedirs(dir, exist_ok=True)
+                with open(
+                    os.path.join(
+                        dir, f"{args.name_exp}_evolving_memory_maps_retrain.pkl"
+                    ),
+                    "wb",
+                ) as f:
+                    pickle.dump(retrain, f, pickle.HIGHEST_PROTOCOL)
+
+            # Adjust learning rate scheduler per epoch
+            scheduler.step()
