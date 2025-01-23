@@ -4,6 +4,8 @@ import pickle
 import argparse
 import numpy as np
 
+import math
+
 import matplotlib.pyplot as plt
 
 import tqdm
@@ -362,10 +364,10 @@ if __name__ == "__main__":
 
                         probs_wminus = torch.softmax(logits_wminus, dim=-1).cpu().numpy()
 
-                        if epoch == (step-1):
+                        if epoch == (step-1) or step == 0:
                             try:
                                 #128 = 32 * 4, 32 epoch 4 batch, first epoch 0-3
-                                pos = (curr%args.bs)%4 + 4*(step-1)
+                                pos = (curr%args.bs)%math.ceil(n_train/args.bs) + math.ceil(n_train/args.bs)*(step)
                                 #print(f'{pos} {step} {epoch}')
                                 softmax_deviations[i] = probs_wminus.flatten() - all_prob[pos][idx_removed]
                                 curr += 1
