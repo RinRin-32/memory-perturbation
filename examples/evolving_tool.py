@@ -1,14 +1,13 @@
 import os
 import sys
-import pickle
 import argparse
 import numpy as np
 
 import math
 
-import matplotlib.pyplot as plt
-
 import tqdm
+
+import h5py
 
 import torch
 from torch import nn
@@ -169,6 +168,10 @@ if __name__ == "__main__":
     # Loss
     criterion = nn.CrossEntropyLoss().to(device)
 
+    output_dir = "h5_files/"
+    os.makedirs(output_dir, exist_ok=True)
+    output_file = os.path.join(output_dir, f"{args.name_exp}_evolving_memory_maps.h5")
+    h5py.File(output_file, "w")
 
     # Data
     if args.dataset != 'MOON':
@@ -203,6 +206,25 @@ if __name__ == "__main__":
     all_scores = {}
     all_prob = []
     curr = 0
+
+    # Open the file in read/write mode
+    with h5py.File(output_file, 'r+') as f:
+        # Check if the 'coord' group exists, create it if not
+        if 'coord' not in f:
+            scores_group = f.create_group('coord')
+            x_coord = scores_group.create_dataset('X_train', data=ds_train.tensors[0])
+            y_coord = scores_group.create_dataset('y_train', data=ds_train.tensors[1])
+        else:
+            scores_group = f['coord']
+
+            # Update X_train and y_train datasets by overwriting them
+            if 'X_train' in scores_group:
+                del scores_group['X_train']  # Remove the existing dataset
+            if 'y_train' in scores_group:
+                del scores_group['y_train']  # Remove the existing dataset
+
+            x_coord = scores_group.create_dataset('X_train', data=ds_train.tensors[0])
+            y_coord = scores_group.create_dataset('y_train', data=ds_train.tensors[1])
 
     for epoch in tqdm.tqdm(list(range(args.epochs))):
         if args.optimizer == 'iblr':
@@ -255,8 +277,7 @@ if __name__ == "__main__":
                         xx, yy, Z = plot_decision_boundary(net, ds_train[:][0], device)
                         decision_boundary = {"xx": xx, "yy": yy, "Z": Z}
 
-                        scores_dict = {'X_train': ds_train.tensors[0],
-                                    'y_train': ds_train.tensors[1],
+                        scores_dict = {
                                     'sensitivities': sensitivities,
                                     'bpe': residuals_summary,
                                     'bls': lev_scores_summary,
@@ -269,17 +290,39 @@ if __name__ == "__main__":
                     # Append scores_dict to all_scores with the epoch as the key
                     all_scores[curr] = scores_dict
                     curr += 1
-
-                    # Save all_scores to a pickle file
-                    dir = 'pickles/'
-                    os.makedirs(os.path.dirname(dir), exist_ok=True)
-                    with open(os.path.join(dir, f"{args.name_exp}_evolving_memory_maps_scores.pkl"), 'wb') as f:
-                        pickle.dump(all_scores, f, pickle.HIGHEST_PROTOCOL)
                 scheduler.step()
         else:
             net, optim = train_one_epoch_sgd_adam(net, optim, device, epoch, len(ds_train))
     
     w_star = parameters_to_vector(net.parameters()).detach().cpu().clone()
+    
+    # Open the file in read/write mode
+    with h5py.File(output_file, 'r+') as f:
+        # Check if the 'scores' group exists, create it if not
+        if 'scores' not in f:
+            scores_group = f.create_group('scores')
+        else:
+            scores_group = f['scores']
+
+        for step, data in all_scores.items():
+        
+            # Add or update a specific epoch group inside the 'scores' group
+            epoch_group_name = f"step_{step}"
+            if epoch_group_name not in scores_group:
+                epoch_group = scores_group.create_group(epoch_group_name)
+            else:
+                epoch_group = scores_group[epoch_group_name]
+            
+            # Now add data to the epoch group as needed
+            for key, value in data.items():
+                if isinstance(value, dict):  # Handle nested structures
+                    sub_group = epoch_group.create_group(key) if key not in epoch_group else epoch_group[key]
+                    for sub_key, sub_value in value.items():
+                        sub_group.create_dataset(sub_key, data=sub_value)
+                else:
+                    if key not in epoch_group:
+                        epoch_group.create_dataset(key, data=value)
+
 
     retrain = {}
 
@@ -366,9 +409,7 @@ if __name__ == "__main__":
 
                         if epoch == (step-1) or step == 0:
                             try:
-                                #128 = 32 * 4, 32 epoch 4 batch, first epoch 0-3
                                 pos = (curr%args.bs)%math.ceil(n_train/args.bs) + math.ceil(n_train/args.bs)*(step)
-                                #print(f'{pos} {step} {epoch}')
                                 softmax_deviations[i] = probs_wminus.flatten() - all_prob[pos][idx_removed]
                                 curr += 1
                                 # L1-norm of softmax deviations across classes
@@ -376,22 +417,38 @@ if __name__ == "__main__":
 
                                 # Save deviations and metadata after every step
                                 retrain_dict = {
-                                    "indices_retrain": indices_retrain,
                                     "softmax_deviations": l1_norms,  # Use L1 norms
                                 }
                                 retrain[pos] = retrain_dict
 
-                                # Save results to a pickle file
-                                dir = "pickles/"
-                                os.makedirs(dir, exist_ok=True)
-                                with open(
-                                    os.path.join(
-                                        dir, f"{args.name_exp}_evolving_memory_maps_retrain.pkl"
-                                    ),
-                                    "wb",
-                                ) as f:
-                                    pickle.dump(retrain, f, pickle.HIGHEST_PROTOCOL)
                             except:
                                 raise RuntimeError(f'{i}, {curr}, {len(all_prob)}, {pos}')
                     
                     scheduler.step()
+
+    # Open the file in read/write mode
+    with h5py.File(output_file, 'r+') as f:
+        # Check if the 'scores' group exists, create it if not
+        if 'scores' not in f:
+            scores_group = f.create_group('scores')
+        else:
+            scores_group = f['scores']
+
+        for step, data in retrain.items():
+        
+            # Add or update a specific epoch group inside the 'scores' group
+            epoch_group_name = f"step_{step}"
+            if epoch_group_name not in scores_group:
+                epoch_group = scores_group.create_group(epoch_group_name)
+            else:
+                epoch_group = scores_group[epoch_group_name]
+            
+            # Now add data to the epoch group as needed
+            for key, value in data.items():
+                if isinstance(value, dict):  # Handle nested structures
+                    sub_group = epoch_group.create_group(key) if key not in epoch_group else epoch_group[key]
+                    for sub_key, sub_value in value.items():
+                        sub_group.create_dataset(sub_key, data=sub_value)
+                else:
+                    if key not in epoch_group:
+                        epoch_group.create_dataset(key, data=value)
