@@ -55,9 +55,6 @@ def get_args():
     # Variance computation
     parser.add_argument('--bs_jacs', default=50, type=int, help='Jacobian batch size for variance computation')
 
-    # Epoch step
-    parser.add_argument('--epochs_step', default=1, type=int, help='How many epoch till logging of sensitivity')
-
     return parser.parse_args()
 
 def train_one_epoch_iblr(net, optim, device):
