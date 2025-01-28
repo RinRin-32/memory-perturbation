@@ -20,7 +20,7 @@ from ivon import IVON as IBLR
 sys.path.append("..")
 from lib.models import get_model
 from lib.datasets import get_dataset
-from lib.utils import get_quick_loader, predict_test, flatten, predict_nll_hess, train_model, predict_train2, train_network
+from lib.utils import get_quick_loader, predict_test, flatten, predict_nll_hess, predict_train2
 from lib.variances import get_covariance_from_iblr, get_covariance_from_adam, get_pred_vars_optim, get_pred_vars_laplace
 
 
@@ -69,7 +69,6 @@ def train_one_epoch_iblr(net, optim, device):
             loss.backward()
         optim.step()
         running_loss += loss.item()
-        ## will have to insert bpe bls and sensitivity calculation
 
     scheduler.step()
     return net, optim
