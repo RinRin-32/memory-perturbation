@@ -2,7 +2,7 @@ import os
 import sys
 import argparse
 import numpy as np
-
+import json
 import math
 
 import tqdm
@@ -255,41 +255,40 @@ if __name__ == "__main__":
                 leverage_upper = max(lev_scores_summary.max(), leverage_upper)
                 residual_upper = max(residuals_summary.max(), residual_upper)
 
-                if epoch % args.epochs_step == 0:  # Save every `epochs_step` epochs
-                    # Evaluate on training data; residuals and lambdas
-                    residuals, probs, lambdas, train_acc, train_nll = predict_train2(net, trainloader_eval, nc, tr_targets, device)
-                    print(f"Train Acc: {(100 * train_acc):>0.2f}%, Train NLL: {train_nll:>6f}")
+                # Evaluate on training data; residuals and lambdas
+                residuals, probs, lambdas, train_acc, train_nll = predict_train2(net, trainloader_eval, nc, tr_targets, device)
+                print(f"Train Acc: {(100 * train_acc):>0.2f}%, Train NLL: {train_nll:>6f}")
 
-                    # Evaluate on test data
-                    test_acc, test_nll = predict_test(net, testloader_eval, nc, te_targets, device)
-                    print(f"Test Acc: {(100 * test_acc):>0.2f}%, Test NLL: {test_nll:>6f}")
+                # Evaluate on test data
+                test_acc, test_nll = predict_test(net, testloader_eval, nc, te_targets, device)
+                print(f"Test Acc: {(100 * test_acc):>0.2f}%, Test NLL: {test_nll:>6f}")
 
-                    # Compute prediction variances
-                    vars = get_pred_vars_laplace(net, trainloader_vars, args.delta, nc, device, version='kfac')
+                # Compute prediction variances
+                vars = get_pred_vars_laplace(net, trainloader_vars, args.delta, nc, device, version='kfac')
 
-                    # Compute and store sensitivities
-                    sensitivities = np.asarray(residuals) * np.asarray(lambdas) * np.asarray(vars)
-                    sensitivities = np.sum(np.abs(sensitivities), axis=-1)
+                # Compute and store sensitivities
+                sensitivities = np.asarray(residuals) * np.asarray(lambdas) * np.asarray(vars)
+                sensitivities = np.sum(np.abs(sensitivities), axis=-1)
 
-                    all_prob.append(probs)
+                all_prob.append(probs)
 
-                    if args.dataset == 'MOON':
-                        xx, yy, Z = plot_decision_boundary(net, ds_train[:][0], device)
-                        decision_boundary = {"xx": xx, "yy": yy, "Z": Z}
+                if args.dataset == 'MOON':
+                    xx, yy, Z = plot_decision_boundary(net, ds_train[:][0], device)
+                    decision_boundary = {"xx": xx, "yy": yy, "Z": Z}
 
-                        scores_dict = {
-                                    'sensitivities': sensitivities,
-                                    'bpe': residuals_summary,
-                                    'bls': lev_scores_summary,
-                                    'decision_boundary': decision_boundary}
-                    else:
-                        scores_dict = {'sensitivities': sensitivities,
-                                    'bpe': residuals_summary,
-                                    'bls': lev_scores_summary}
+                    scores_dict = {
+                                'sensitivities': sensitivities,
+                                'bpe': residuals_summary,
+                                'bls': lev_scores_summary,
+                                'decision_boundary': decision_boundary}
+                else:
+                    scores_dict = {'sensitivities': sensitivities,
+                                'bpe': residuals_summary,
+                                'bls': lev_scores_summary}
 
-                    # Append scores_dict to all_scores with the epoch as the key
-                    all_scores[curr] = scores_dict
-                    curr += 1
+                # Append scores_dict to all_scores with the epoch as the key
+                all_scores[curr] = scores_dict
+                curr += 1
                 scheduler.step()
         else:
             net, optim = train_one_epoch_sgd_adam(net, optim, device, epoch, len(ds_train))
@@ -452,3 +451,16 @@ if __name__ == "__main__":
                 else:
                     if key not in epoch_group:
                         epoch_group.create_dataset(key, data=value)
+
+        if 'config' not in f:
+            config_group = f.create_group('config')
+            config_data = {
+                "total_step": len(retrain),
+                "epoch": args.epochs,
+                "log_step": 1, #gonna turn this to args later
+                "total_batch": math.ceil(n_train / args.bs)
+            }
+            # Convert the config to a JSON string
+            config_json = json.dumps(config_data)
+            # Save the JSON string as a dataset in the 'config' group
+            config_group.create_dataset("config_data", data=config_json)
