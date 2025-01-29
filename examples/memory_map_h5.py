@@ -293,8 +293,6 @@ if __name__ == "__main__":
 
         for key,value in scores_dict.items():
             scores_group.create_dataset(key,  data=value)
-        
-        retrain_group = hf.create_group('retrain')
 
         for key,value in retrain_dict.items():
-            retrain_group.create_dataset(key, data=value)
+            scores_group.create_dataset(key, data=value)

@@ -2,7 +2,7 @@ import h5py
 import json
 
 # Open the HDF5 file
-with h5py.File("./mnist_lenet_ibr_memory_maps.h5", 'r') as f:
+with h5py.File("./mmtest_memory_maps.h5", 'r') as f:
     # Print top-level groups
     for item in f.keys():
         print(item + ":", f[item])
@@ -35,7 +35,7 @@ with h5py.File("./mnist_lenet_ibr_memory_maps.h5", 'r') as f:
 
     # Print the keys in the 'scores' group
     for item in f.require_group('scores').keys():
-        print('scores/' + item)
+        item_path = 'scores/' + item
 
-    for item in f.require_group('retrain').keys():
-        print('retrain/' + item)
+        read = f[item_path]
+        print(read)
