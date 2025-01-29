@@ -286,21 +286,21 @@ if __name__ == "__main__":
         for step, data in all_scores.items():
         
             # Add or update a specific epoch group inside the 'scores' group
-            epoch_group_name = f"step_{step}"
-            if epoch_group_name not in scores_group:
-                epoch_group = scores_group.create_group(epoch_group_name)
+            step_group_name = f"step_{step}"
+            if step_group_name not in scores_group:
+                step_group = scores_group.create_group(step_group_name)
             else:
-                epoch_group = scores_group[epoch_group_name]
+                step_group = scores_group[step_group_name]
             
             # Now add data to the epoch group as needed
             for key, value in data.items():
                 if isinstance(value, dict):  # Handle nested structures
-                    sub_group = epoch_group.create_group(key) if key not in epoch_group else epoch_group[key]
+                    sub_group = step_group.create_group(key) if key not in step_group else step_group[key]
                     for sub_key, sub_value in value.items():
                         sub_group.create_dataset(sub_key, data=sub_value)
                 else:
-                    if key not in epoch_group:
-                        epoch_group.create_dataset(key, data=value)
+                    if key not in step_group:
+                        step_group.create_dataset(key, data=value)
 
 
     retrain = {}
@@ -416,21 +416,21 @@ if __name__ == "__main__":
         for step, data in retrain.items():
         
             # Add or update a specific epoch group inside the 'scores' group
-            epoch_group_name = f"step_{step}"
-            if epoch_group_name not in scores_group:
-                epoch_group = scores_group.create_group(epoch_group_name)
+            step_group_name = f"step_{step}"
+            if step_group_name not in scores_group:
+                step_group = scores_group.create_group(step_group_name)
             else:
-                epoch_group = scores_group[epoch_group_name]
+                step_group = scores_group[step_group_name]
             
             # Now add data to the epoch group as needed
             for key, value in data.items():
                 if isinstance(value, dict):  # Handle nested structures
-                    sub_group = epoch_group.create_group(key) if key not in epoch_group else epoch_group[key]
+                    sub_group = step_group.create_group(key) if key not in step_group else step_group[key]
                     for sub_key, sub_value in value.items():
                         sub_group.create_dataset(sub_key, data=sub_value)
                 else:
-                    if key not in epoch_group:
-                        epoch_group.create_dataset(key, data=value)
+                    if key not in step_group:
+                        step_group.create_dataset(key, data=value)
 
         if 'config' not in f:
             config_group = f.create_group('config')

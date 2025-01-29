@@ -20,6 +20,8 @@ from lib.datasets import get_dataset
 from lib.utils import get_quick_loader, predict_test, flatten, predict_nll_hess, train_model, predict_train2
 from lib.variances import get_covariance_from_iblr, get_covariance_from_adam, get_pred_vars_optim, get_pred_vars_laplace
 
+import h5py
+
 
 def get_args():
     parser = argparse.ArgumentParser(description='Plotting Memory Maps')
@@ -120,6 +122,9 @@ def get_prediction_vars(optim, device):
 if __name__ == "__main__":
     args = get_args()
     print(args)
+    
+    dir = 'h5_files/'
+    os.makedirs(os.path.dirname(dir), exist_ok=True)
 
     if args.dataset == 'MOON' and (args.model == 'lenet' or args.model == 'cnn_deepobs'):
         raise NotImplementedError(f'{args.model} does not support the moon dataset')
@@ -174,11 +179,9 @@ if __name__ == "__main__":
             net, optim = train_one_epoch_sgd_adam(net, optim, device)
 
         test_acc, test_nll = predict_test(net, testloader_eval, nc, te_targets, device)
-        #print(f"Test Acc: {(100 * test_acc):>0.2f}%, Test NLL: {test_nll:>6f}")
         test_nll_lst.append(test_nll)
 
         residuals, probs, logits, nll_hess, train_acc, train_nll = predict_nll_hess(net, trainloader_eval, nc, tr_targets, device)
-        #print(f"Train Acc: {(100 * train_acc):>0.2f}%, Train NLL: {train_nll:>6f}")
 
         vars, optim = get_prediction_vars(optim, device)
 
@@ -220,15 +223,8 @@ if __name__ == "__main__":
                     'bpe': residuals_summary,
                     'bls': lev_scores_summary}
 
-    
-    dir = 'pickles/'
-    os.makedirs(os.path.dirname(dir), exist_ok=True)
-    with open(dir + args.name_exp + '_memory_maps_scores.pkl', 'wb') as f:
-        pickle.dump(scores_dict, f, pickle.HIGHEST_PROTOCOL)
-
     # Start of LOO experiment
     indices = np.arange(0, n_train, 1)
-    #np.random.shuffle(indices)
     indices_retrain = indices[0:args.n_retrain]
 
     # Retrain with one example removed
@@ -291,5 +287,14 @@ if __name__ == "__main__":
     retrain_dict = {'indices_retrain': indices_retrain,
                     'softmax_deviations': softmax_deviations,
                      }
-    with open('pickles/' + args.name_exp + '_memory_maps_retrain.pkl', 'wb') as f:
-        pickle.dump(retrain_dict, f, pickle.HIGHEST_PROTOCOL)
+
+    with h5py.File(dir + args.name_exp + '_memory_maps.h5', 'w') as hf:
+        scores_group = hf.create_group('scores')
+
+        for key,value in scores_dict.items():
+            scores_group.create_dataset(key,  data=value)
+        
+        retrain_group = hf.create_group('retrain')
+
+        for key,value in retrain_dict.items():
+            retrain_group.create_dataset(key, data=value)
