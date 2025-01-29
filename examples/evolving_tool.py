@@ -55,6 +55,9 @@ def get_args():
     # Variance computation
     parser.add_argument('--bs_jacs', default=50, type=int, help='Jacobian batch size for variance computation')
 
+    # logging
+    parser.add_argument('--log_step', default = 1, type=int, help='1 equates to logging on every step')
+
     return parser.parse_args()
 
 def train_one_epoch_iblr(net, optim, device):
@@ -283,7 +286,7 @@ if __name__ == "__main__":
                                 'bls': lev_scores_summary}
 
                 # Append scores_dict to all_scores with the epoch as the key
-                all_scores[curr] = scores_dict
+                all_scores[math.ceil(curr/args.log_step)] = scores_dict
                 curr += 1
                 scheduler.step()
         else:
@@ -414,7 +417,7 @@ if __name__ == "__main__":
                                 retrain_dict = {
                                     "softmax_deviations": l1_norms,  # Use L1 norms
                                 }
-                                retrain[pos] = retrain_dict
+                                retrain[math.ceil(pos/args.log_step)] = retrain_dict
 
                             except:
                                 raise RuntimeError(f'{i}, {curr}, {len(all_prob)}, {pos}')
@@ -453,7 +456,7 @@ if __name__ == "__main__":
             config_data = {
                 "total_step": len(retrain),
                 "epoch": args.epochs,
-                "log_step": 1, #gonna turn this to args later
+                "log_step": args.log_step, #gonna turn this to args later
                 "total_batch": math.ceil(n_train / args.bs)
             }
             # Convert the config to a JSON string

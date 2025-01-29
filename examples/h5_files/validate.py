@@ -2,7 +2,7 @@ import h5py
 import json
 
 # Open the HDF5 file
-with h5py.File("./test_2_evolving_memory_maps.h5", 'r') as f:
+with h5py.File("./test_3_evolving_memory_maps.h5", 'r') as f:
     # Print top-level groups
     for item in f.keys():
         print(item + ":", f[item])
