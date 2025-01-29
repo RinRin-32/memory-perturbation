@@ -257,7 +257,7 @@ if __name__ == "__main__":
             # For other datasets (like MNIST, CIFAR10), you can use the default removal
             ds_train_perturbed = Subset(ds_train, idx_remain)
         
-        trainloader_retrain = get_quick_loader(DataLoader(ds_train_perturbed, batch_size=args.bs, shuffle=True), device=device)
+        trainloader_retrain = get_quick_loader(DataLoader(ds_train_perturbed, batch_size=args.bs, shuffle=False), device=device)
 
         # Retraining
         criterion = nn.CrossEntropyLoss(reduction='mean').to(device)
