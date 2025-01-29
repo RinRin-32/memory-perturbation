@@ -47,9 +47,7 @@ def get_args():
     parser.add_argument('--hess_init', default=0.9, type=float, help='Hessian initialization')
 
     # Retraining
-    parser.add_argument('--lr_retrain', default=2, type=float, help='retraining: learning rate')
     parser.add_argument('--lrmin_retrain', default=0.0, type=float, help='retraining: min learning rate scheduler')
-    parser.add_argument('--epochs_retrain', default=30, type=int, help='retraining: number of epochs')
     parser.add_argument('--n_retrain', default=800, type=int, help='number of retrained examples')
 
     # Variance computation
@@ -59,22 +57,6 @@ def get_args():
     parser.add_argument('--log_step', default = 1, type=int, help='1 equates to logging on every step')
 
     return parser.parse_args()
-
-def train_one_epoch_iblr(net, optim, device):
-    net.train()
-    running_loss = 0
-    for X, y in trainloader:
-        X, y = X.to(device), y.to(device)
-        with optim.sampled_params(train=True):
-            optim.zero_grad()
-            fs = net(X)
-            loss = criterion(fs, y)
-            loss.backward()
-        optim.step()
-        running_loss += loss.item()
-
-    scheduler.step()
-    return net, optim
 
 def train_one_epoch_sgd_adam(net, optim, device):
     net.train()
@@ -99,10 +81,7 @@ def train_one_epoch_sgd_adam(net, optim, device):
     return net, optim
 
 def get_optimizer(retrain=False):
-    if retrain:
-        lr = args.lr_retrain
-    else:
-        lr = args.lr
+    lr = args.lr
     if args.optimizer == 'adam':
         optim = Adam(net.parameters(), lr=lr, weight_decay=0)
     elif args.optimizer == 'iblr':
@@ -153,6 +132,9 @@ if __name__ == "__main__":
 
     if args.dataset == 'MOON' and (args.model == 'lenet' or args.model == 'cnn_deepobs'):
         raise NotImplementedError(f'{args.model} does not support the moon dataset')
+    
+    if args.optimizer == 'adam':
+        raise NotImplementedError(f'{args.optimizer} is not supported for the current version of Evolving Tool.')
     
     seed = 1
     np.random.seed(seed)
@@ -227,7 +209,6 @@ if __name__ == "__main__":
 
     for epoch in tqdm.tqdm(list(range(args.epochs))):
         if args.optimizer == 'iblr':
-            #net, optim = train_one_epoch_iblr(net, optim, device, epoch, len(ds_train))
             net.train()
             running_loss = 0
             for X, y in trainloader:
