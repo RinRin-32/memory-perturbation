@@ -1,6 +1,5 @@
 import os
 import sys
-import pickle
 import argparse
 import numpy as np
 
@@ -21,7 +20,7 @@ from lib.utils import get_quick_loader, predict_test, flatten, predict_nll_hess,
 from lib.variances import get_covariance_from_iblr, get_covariance_from_adam, get_pred_vars_optim, get_pred_vars_laplace
 
 import h5py
-
+import json
 
 def get_args():
     parser = argparse.ArgumentParser(description='Plotting Memory Maps')
@@ -170,6 +169,20 @@ if __name__ == "__main__":
     # Learning rate scheduler
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=args.epochs)
 
+    config = {
+        "input_size": input_size,
+        "nc": nc,
+        "model": args.model,
+        "device": device,
+        "optimizer": args.optimizer,
+        "optimizer_params": {key: value for key, value in vars(args).items() if key.startswith('lr') or key.startswith('delta') or key.startswith('hess_init')},
+        "max_epochs": args.epochs,
+        "loss_criterion": "CrossEntropyLoss",
+        "n_retrain": args.n_retrain
+    }
+
+    config_json = json.dumps(config)
+
     residual_upper, leverage_upper = 0.,0.
     test_nll_lst, loocv_lst = [], []
     for _ in tqdm.tqdm(list(range(args.epochs))):
@@ -290,9 +303,13 @@ if __name__ == "__main__":
 
     with h5py.File(dir + args.name_exp + '_memory_maps.h5', 'w') as hf:
         scores_group = hf.create_group('scores')
-
-        for key,value in scores_dict.items():
-            scores_group.create_dataset(key,  data=value)
-
-        for key,value in retrain_dict.items():
+        
+        for key, value in scores_dict.items():
             scores_group.create_dataset(key, data=value)
+        
+        for key, value in retrain_dict.items():
+            scores_group.create_dataset(key, data=value)
+        
+        # Save config as a JSON string
+        config_group = hf.create_group('config')
+        config_group.create_dataset('config_data', data=config_json)
