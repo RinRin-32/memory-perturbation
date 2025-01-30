@@ -26,12 +26,12 @@ def get_args():
     parser = argparse.ArgumentParser(description='Plotting Memory Maps')
 
     # Experiment
-    parser.add_argument('--name_exp', default='mnist_lenet_ibr', type=str, help='name of experiment')
+    parser.add_argument('--name_exp', default='memory_maps', type=str, help='name of experiment')
 
     # Data, Model
-    parser.add_argument('--dataset', default='MNIST', choices=['MNIST', 'FMNIST', 'CIFAR10', 'MOON'])
-    parser.add_argument('--moon_noise', default = 0.2, type=float, help='desired noise for moon')
-    parser.add_argument('--model', default='lenet',choices=['large_mlp', 'lenet', 'small_mlp', 'cnn_deepobs', 'nn'])
+    parser.add_argument('--dataset', default='MOON', choices=['MNIST', 'FMNIST', 'CIFAR10', 'MOON'])
+    parser.add_argument('--moon_noise', default = 0.05, type=float, help='desired noise for moon')
+    parser.add_argument('--model', default='small_mlp',choices=['large_mlp', 'lenet', 'small_mlp', 'cnn_deepobs', 'nn'])
 
     # Optimization
     parser.add_argument('--optimizer', default='iblr', choices=['iblr', 'adam'])
@@ -134,8 +134,8 @@ if __name__ == "__main__":
 
 
     # Device
-    #device = 'mps' if torch.backends.mps.is_available() else 'cuda' if torch.cuda.is_available() else 'cpu'
-    device = 'cuda'
+    device = 'mps' if torch.backends.mps.is_available() else 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = 'cpu'
     print('device', device)
 
     # Loss
@@ -194,18 +194,18 @@ if __name__ == "__main__":
         test_acc, test_nll = predict_test(net, testloader_eval, nc, te_targets, device)
         test_nll_lst.append(test_nll)
 
-        residuals, probs, logits, nll_hess, train_acc, train_nll = predict_nll_hess(net, trainloader_eval, nc, tr_targets, device)
+    residuals, probs, logits, nll_hess, train_acc, train_nll = predict_nll_hess(net, trainloader_eval, nc, tr_targets, device)
 
-        vars, optim = get_prediction_vars(optim, device)
+    vars, optim = get_prediction_vars(optim, device)
 
-        # Evaluate memory map criteria
-        residuals_summary = torch.sqrt(torch.sum(residuals**2, dim=1)).detach().numpy() # l2norm
-        lev_scores_full = torch.einsum('nij,nji->ni', vars, nll_hess)
-        lev_scores_full = torch.clamp(lev_scores_full, 0.)
-        lev_scores_summary = torch.sqrt(torch.sum(lev_scores_full**2, dim=1)).cpu().detach().numpy()
+    # Evaluate memory map criteria
+    residuals_summary = torch.sqrt(torch.sum(residuals**2, dim=1)).detach().numpy() # l2norm
+    lev_scores_full = torch.einsum('nij,nji->ni', vars, nll_hess)
+    lev_scores_full = torch.clamp(lev_scores_full, 0.)
+    lev_scores_summary = torch.sqrt(torch.sum(lev_scores_full**2, dim=1)).cpu().detach().numpy()
 
-        leverage_upper = lev_scores_summary.max() if lev_scores_summary.max() > leverage_upper else leverage_upper
-        residual_upper = residuals_summary.max() if residuals_summary.max() > residual_upper else residual_upper
+    leverage_upper = lev_scores_summary.max() if lev_scores_summary.max() > leverage_upper else leverage_upper
+    residual_upper = residuals_summary.max() if residuals_summary.max() > residual_upper else residual_upper
     
     w_star = parameters_to_vector(net.parameters()).detach().cpu().clone()
 
