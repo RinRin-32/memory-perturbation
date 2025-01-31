@@ -36,7 +36,7 @@ def get_args():
     parser.add_argument('--model', default='small_mlp',choices=['large_mlp', 'lenet', 'small_mlp', 'cnn_deepobs', 'nn'])
 
     # Optimization
-    parser.add_argument('--optimizer', default='iblr', choices=['iblr', 'adam'])
+    parser.add_argument('--optimizer', default='iblr', choices=['iblr']) #no adam support yet
     parser.add_argument('--lr', default=2, type=float, help='learning rate')
     parser.add_argument('--lrmin', default=0.0, type=float, help='min learning rate of scheduler')
     parser.add_argument('--bs', default=256, type=int, help='batch size')
@@ -191,11 +191,11 @@ if __name__ == "__main__":
     # Open the file in read/write mode
     with h5py.File(output_file, 'r+') as f:
         # Check if the 'coord' group exists, create it if not
-        if 'coord' not in f:
+        if 'coord' not in f and args.dataset == 'MOON':
             scores_group = f.create_group('coord')
             x_coord = scores_group.create_dataset('X_train', data=ds_train.tensors[0])
             y_coord = scores_group.create_dataset('y_train', data=ds_train.tensors[1])
-        else:
+        elif args.dataset == 'MOON':
             scores_group = f['coord']
 
             # Update X_train and y_train datasets by overwriting them

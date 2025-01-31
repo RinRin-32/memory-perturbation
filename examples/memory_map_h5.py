@@ -34,7 +34,7 @@ def get_args():
     parser.add_argument('--model', default='small_mlp',choices=['large_mlp', 'lenet', 'small_mlp', 'cnn_deepobs', 'nn'])
 
     # Optimization
-    parser.add_argument('--optimizer', default='iblr', choices=['iblr', 'adam'])
+    parser.add_argument('--optimizer', default='iblr', choices=['iblr']) #no adam support yet
     parser.add_argument('--lr', default=2, type=float, help='learning rate')
     parser.add_argument('--lrmin', default=1e-3, type=float, help='min learning rate of scheduler')
     parser.add_argument('--bs', default=256, type=int, help='batch size')
@@ -135,7 +135,6 @@ if __name__ == "__main__":
 
     # Device
     device = 'mps' if torch.backends.mps.is_available() else 'cuda' if torch.cuda.is_available() else 'cpu'
-    device = 'cpu'
     print('device', device)
 
     # Loss
@@ -171,11 +170,15 @@ if __name__ == "__main__":
 
     config = {
         "input_size": input_size,
-        "nc": nc,
+        "nc": int(nc.item()) if isinstance(nc, torch.Tensor) else nc,
         "model": args.model,
         "device": device,
         "optimizer": args.optimizer,
-        "optimizer_params": {key: value for key, value in vars(args).items() if key.startswith('lr') or key.startswith('delta') or key.startswith('hess_init')},
+        "optimizer_params": {
+            key: value
+            for key, value in vars(args).items()
+            if (key.startswith('lr') or key.startswith('delta') or key.startswith('hess_init'))
+        },
         "max_epochs": args.epochs,
         "loss_criterion": "CrossEntropyLoss",
         "n_retrain": args.n_retrain
