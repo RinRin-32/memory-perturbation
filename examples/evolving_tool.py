@@ -31,7 +31,7 @@ def get_args():
     parser.add_argument('--name_exp', default='visualizer', type=str, help='name of experiment')
 
     # Data, Model
-    parser.add_argument('--dataset', default='MOON', choices=['MNIST', 'FMNIST', 'CIFAR10', 'MOON'])
+    parser.add_argument('--dataset', default='MOON', choices=['MNIST', 'FMNIST', 'CIFAR10', 'MOON', 'MNIST_REDUX'])
     parser.add_argument('--moon_noise', default = 0.2, type=float, help='desired noise for moon')
     parser.add_argument('--model', default='small_mlp',choices=['large_mlp', 'lenet', 'small_mlp', 'cnn_deepobs', 'nn'])
 
@@ -155,7 +155,7 @@ if __name__ == "__main__":
     h5py.File(output_file, "w")
 
     # Data
-    if args.dataset != 'MOON':
+    if args.dataset != 'MOON' and args.dataset != 'MNIST_REDUX':
         ds_train, ds_test, transform_train = get_dataset(args.dataset, return_transform=True)
         input_size = len(ds_train.data[0, :])**2
         nc = max(ds_train.targets) + 1
@@ -191,7 +191,7 @@ if __name__ == "__main__":
     # Open the file in read/write mode
     with h5py.File(output_file, 'r+') as f:
         # Check if the 'coord' group exists, create it if not
-        if 'coord' not in f and args.dataset == 'MOON':
+        if 'coord' not in f and (args.dataset == 'MOON' or args.dataset == 'MNIST_REDUX'):
             scores_group = f.create_group('coord')
             x_coord = scores_group.create_dataset('X_train', data=ds_train.tensors[0])
             y_coord = scores_group.create_dataset('y_train', data=ds_train.tensors[1])
@@ -323,7 +323,7 @@ if __name__ == "__main__":
             idx_removed = indices_retrain[i]
             idx_remain = np.setdiff1d(np.arange(0, n_train), idx_removed)
 
-            if args.dataset == "MOON":
+            if args.dataset == "MOON" or args.dataset == 'MNIST_REDUX':
                 X_removed = ds_train[idx_removed][0].tolist()
                 ds_train_perturbed_list = [
                     (x.tolist(), y)
@@ -371,7 +371,7 @@ if __name__ == "__main__":
 
                     net.eval()
                     with torch.no_grad():
-                        if args.dataset == "MOON":
+                        if args.dataset == "MOON" or args.dataset == 'MNIST_REDUX':
                             logits_wminus = net(X_removed.to(device))
                         else:
                             if device == "cuda":
