@@ -3,6 +3,9 @@ import torchvision.transforms as transforms
 import torch
 from sklearn.datasets import make_moons
 from torch.utils.data import TensorDataset
+import numpy as np
+from sklearn.decomposition import PCA
+from sklearn.manifold import TSNE
 
 
 transform_usps = transforms.Compose([
@@ -24,6 +27,9 @@ transform_cifar10 = transforms.Compose([
 transform_moon = transforms.Compose([
     transforms.Lambda(lambda x: torch.tensor(x, dtype=torch.float32))
 ])
+transform_tSNE_mnist = transforms.Compose([
+    transforms.Lambda(lambda x: torch.tensor(x, dtype=torch.float32))
+])
 
 def get_dataset(name_dataset, return_transform=False, n_samples=1000, noise=5, test_split=0.2):
     if name_dataset == 'MNIST':
@@ -38,6 +44,9 @@ def get_dataset(name_dataset, return_transform=False, n_samples=1000, noise=5, t
     elif name_dataset == 'MOON':
         ds_train, ds_test = load_moon(n_samples, noise, test_split)
         transform = transform_moon
+    elif name_dataset == 'MNIST_REDUX':
+        ds_train, ds_test = load_tSNE_mnist()
+        transform = transform_tSNE_mnist
     else:
         raise NotImplementedError
     if return_transform:
@@ -66,6 +75,42 @@ def load_mnist():
     testset = torchvision.datasets.MNIST(
         root='../data', train=False, download=True, transform=transform_mnist)
     return trainset, testset
+
+def load_tSNE_mnist():
+    trainset = torchvision.datasets.MNIST(
+        root='../data', train=True, download=True, transform=transform_mnist)
+    testset = torchvision.datasets.MNIST(
+        root='../data', train=False, download=True, transform=transform_mnist)
+
+    # Convert datasets to NumPy arrays
+    train_images = np.array([trainset[i][0].numpy().reshape(-1) for i in range(len(trainset))])
+    train_labels = np.array([trainset[i][1] for i in range(len(trainset))])
+    
+    test_images = np.array([testset[i][0].numpy().reshape(-1) for i in range(len(testset))])
+    test_labels = np.array([testset[i][1] for i in range(len(testset))])
+
+    # Step 1: PCA (reduce to 50 dimensions)
+    pca = PCA(n_components=50)
+    train_pca = pca.fit_transform(train_images)
+    test_pca = pca.transform(test_images)
+
+    # Step 2: t-SNE (reduce to 2 dimensions)
+    tsne = TSNE(n_components=2, perplexity=30, random_state=42, max_iter=1000)
+    train_tsne = tsne.fit_transform(train_pca)
+    test_tsne = tsne.fit_transform(test_pca)
+
+    X_train = torch.tensor(train_tsne, dtype=torch.float32)
+    X_test = torch.tensor(test_tsne, dtype=torch.float32)
+    y_train = torch.tensor(train_labels, dtype=torch.long)
+    y_test = torch.tensor(test_labels, dtype=torch.long)
+
+    # Create a custom Dataset
+    trainset = TensorDataset(X_train, y_train)
+    testset = TensorDataset(X_test, y_test)
+
+    return trainset, testset
+
+
 
 def load_fmnist():
     trainset = torchvision.datasets.FashionMNIST(
