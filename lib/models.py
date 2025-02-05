@@ -16,6 +16,8 @@ def get_model(model_name, nc, input_size, device, seed):
         net = NeuralNetwork().to(device)
     elif model_name == 'lenet':
         net = LeNet5(output_size=nc).to(device)
+    elif model_name == 'linear_model':
+        net = LinearModel().to(device)
     elif model_name == 'cnn_deepobs':
         net = CIFAR10Net().to(device)
     elif model_name == 'resnet20_frn':
@@ -35,6 +37,14 @@ class NeuralNetwork(nn.Module):
         x = self.relu(self.layer1(x))
         x = self.relu(self.layer2(x))
         x = self.layer3(x)
+        return x
+    
+class LinearModel(nn.Module):
+    def __init__(self):
+        super(LinearModel, self).__init__()
+        self.layer1 = nn.Linear(2, 2)
+    def forward(self, x):
+        x = self.layer1(x)
         return x
 
 
