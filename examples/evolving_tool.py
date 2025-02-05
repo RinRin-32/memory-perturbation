@@ -22,6 +22,7 @@ from lib.models import get_model
 from lib.datasets import get_dataset
 from lib.utils import get_quick_loader, predict_test, flatten, predict_nll_hess, predict_train2
 from lib.variances import get_covariance_from_iblr, get_covariance_from_adam, get_pred_vars_optim, get_pred_vars_laplace
+import matplotlib.pyplot as plt
 
 
 def get_args():
@@ -33,7 +34,7 @@ def get_args():
     # Data, Model
     parser.add_argument('--dataset', default='MOON', choices=['MNIST', 'FMNIST', 'CIFAR10', 'MOON', 'MNIST_REDUX'])
     parser.add_argument('--moon_noise', default = 0.2, type=float, help='desired noise for moon')
-    parser.add_argument('--model', default='small_mlp',choices=['large_mlp', 'lenet', 'small_mlp', 'cnn_deepobs', 'nn'])
+    parser.add_argument('--model', default='small_mlp',choices=['large_mlp', 'lenet', 'small_mlp', 'cnn_deepobs', 'nn', 'linear_model'])
 
     # Optimization
     parser.add_argument('--optimizer', default='iblr', choices=['iblr']) #no adam support yet
@@ -125,6 +126,89 @@ def get_prediction_vars(optim, device):
 
     return vars, optim
 
+def save_visualization(dataset, num_samples=1000, filename="dataset_plot.png"):
+    """Saves a 2D PyTorch dataset visualization to a file."""
+    
+    # Extract a subset of data
+    X, y = zip(*[dataset[i] for i in range(min(len(dataset), num_samples))])  
+    X = torch.stack(X)  # Ensure it's a tensor
+    y = torch.tensor(y)  # Ensure labels are tensor
+    
+    # Create plot
+    plt.figure(figsize=(8, 6))
+    scatter = plt.scatter(X[:, 0], X[:, 1], c=y.numpy(), cmap='tab10', alpha=0.5)
+    plt.colorbar(scatter, label="Class Labels")
+    plt.xlabel("Feature 1")
+    plt.ylabel("Feature 2")
+    plt.title("2D Visualization of Dataset")
+    
+    # Save image
+    save_path = os.path.join("./" + filename)
+    plt.savefig(save_path)
+    plt.close()
+    
+    return save_path
+
+def plot_contour(model, dataset, save_path="contour_plot.png", resolution=0.01, batch_size=10000):
+    model.eval()  # Set to evaluation mode
+
+    # Extract features and labels from dataset
+    X, y = zip(*dataset)
+    X = torch.stack(X).numpy()
+    y = torch.stack(y).numpy()
+
+    # Define the plot area
+    x_min, x_max = X[:, 0].min() - 1, X[:, 0].max() + 1
+    y_min, y_max = X[:, 1].min() - 1, X[:, 1].max() + 1
+
+    # Create a mesh grid over the feature space
+    xx, yy = np.meshgrid(
+        np.arange(x_min, x_max, resolution),
+        np.arange(y_min, y_max, resolution)
+    )
+
+    # Flatten grid
+    grid_points = np.c_[xx.ravel(), yy.ravel()]
+
+    # Move model to CPU to save CUDA memory
+    device = next(model.parameters()).device
+    model_cpu = model.to("cpu")
+
+    # Predict in batches to save memory
+    predictions = []
+    with torch.no_grad():
+        for i in range(0, len(grid_points), batch_size):
+            batch = torch.tensor(grid_points[i:i + batch_size], dtype=torch.float32)
+            batch_preds = model_cpu(batch).argmax(dim=1).numpy()
+            predictions.append(batch_preds)
+
+    # Combine results
+    Z = np.concatenate(predictions).reshape(xx.shape)
+
+    # Move model back to its original device
+    model.to(device)
+
+    # Plot decision boundary
+    plt.figure(figsize=(8, 6))
+    plt.contourf(xx, yy, Z, alpha=0.3, cmap=plt.cm.Paired)  # Smooth filled contour
+    plt.contour(xx, yy, Z, colors='black', linewidths=1, alpha=0.7)  # Clear boundary lines
+
+    # Scatter plot of actual data points
+    scatter = plt.scatter(X[:, 0], X[:, 1], c=y, cmap=plt.cm.Paired, edgecolors='white', alpha=0.5)
+
+    # Add legend and labels
+    plt.colorbar(scatter)
+    plt.xlabel('t-SNE Dim 1')
+    plt.ylabel('t-SNE Dim 2')
+    plt.title('Decision Boundary of Multi-Class Classifier')
+
+    # Save the plot instead of showing it
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
+
+    print(f"Contour plot saved as {save_path}")
+
+    return xx, yy, Z
 
 if __name__ == "__main__":
     args = get_args()
@@ -167,6 +251,8 @@ if __name__ == "__main__":
         tr_targets = torch.asarray([target for _, target in ds_train])
         te_targets = torch.asarray([target for _, target in ds_test])
     n_train = len(ds_train)
+    #usage: For quick look at how your data look on 2D plane
+    #save_visualization(ds_train)
 
     # Model
     net = get_model(args.model, nc, input_size, device, seed)
@@ -231,6 +317,14 @@ if __name__ == "__main__":
                 lev_scores_full = torch.einsum('nij,nji->ni', vars, nll_hess)
                 lev_scores_full = torch.clamp(lev_scores_full, 0.)
                 lev_scores_summary = torch.sqrt(torch.sum(lev_scores_full**2, dim=1)).cpu().detach().numpy()
+                marginal_vars = vars.diagonal(dim1=1, dim2=2)
+
+                epsilon = 1e-10
+                marginal_vars += epsilon
+
+                lambda_per_datapoint = lev_scores_full / marginal_vars
+                avg_lambda = torch.mean(lambda_per_datapoint, dim=1)
+                avg_vars = torch.mean(marginal_vars, dim=1)
 
                 leverage_upper = max(lev_scores_summary.max(), leverage_upper)
                 residual_upper = max(residuals_summary.max(), residual_upper)
@@ -260,11 +354,27 @@ if __name__ == "__main__":
                                 'sensitivities': sensitivities,
                                 'bpe': residuals_summary,
                                 'bls': lev_scores_summary,
-                                'decision_boundary': decision_boundary}
+                                'decision_boundary': decision_boundary,
+                                'average_marginal': avg_vars,
+                                'average_lambda': avg_lambda}
+                elif args.dataset == 'MNIST_REDUX':
+                    xx, yy, Z = plot_contour(net, ds_train)
+                    decision_boundary = {"xx": xx, "yy": yy, "Z": Z}
+
+                    scores_dict = {
+                                'sensitivities': sensitivities,
+                                'bpe': residuals_summary,
+                                'bls': lev_scores_summary,
+                                'decision_boundary': decision_boundary,
+                                'average_marginal': avg_vars,
+                                'average_lambda': avg_lambda
+                    }
                 else:
                     scores_dict = {'sensitivities': sensitivities,
                                 'bpe': residuals_summary,
-                                'bls': lev_scores_summary}
+                                'bls': lev_scores_summary,
+                                'average_marginal': avg_vars,
+                                'average_lambda': avg_lambda}
 
                 # Append scores_dict to all_scores with the epoch as the key
                 all_scores[math.ceil(curr/args.log_step)] = scores_dict
