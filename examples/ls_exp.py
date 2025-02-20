@@ -10,8 +10,8 @@ import h5py
 
 import torch
 from torch import nn
-from torch.nn.utils import parameters_to_vector, vector_to_parameters
-from torch.utils.data import DataLoader, Subset
+from torch.nn.utils import parameters_to_vector
+from torch.utils.data import DataLoader
 from torch.optim import SGD, Adam, AdamW
 import torch.nn.functional as F
 
@@ -24,9 +24,6 @@ from lib.models import get_model
 from lib.datasets import get_dataset
 from lib.utils import get_quick_loader, predict_test, flatten, predict_nll_hess, predict_train2
 from lib.variances import get_covariance_from_iblr, get_covariance_from_adam, get_pred_vars_optim, get_pred_vars_laplace
-import matplotlib.pyplot as plt
-
-from sklearn.manifold import TSNE
 
 
 def get_args():
@@ -107,28 +104,6 @@ def get_optimizer():
         raise NotImplementedError
     return optim
 
-
-def plot_decision_boundary(model, X, device='cuda'):
-    # Define the grid range
-    x_min, x_max = X[:, 0].min() - 0.5, X[:, 0].max() + 0.5
-    y_min, y_max = X[:, 1].min() - 0.5, X[:, 1].max() + 0.5
-    xx, yy = np.meshgrid(np.arange(x_min, x_max, 0.01),
-                         np.arange(y_min, y_max, 0.01))
-    
-    # Create the grid points
-    grid = np.c_[xx.ravel(), yy.ravel()]
-    
-    # Predict on the grid
-    model.eval()
-    with torch.no_grad():
-        grid_tensor = torch.tensor(grid, dtype=torch.float32).to(device)
-        preds = model(grid_tensor).argmax(dim=1).cpu().numpy()
-    
-    # Reshape predictions to match the grid
-    Z = preds.reshape(xx.shape)
-
-    return xx, yy, Z
-
 def get_prediction_vars(optim, device):
     if args.optimizer == 'adam':
         sigma_sqrs = get_covariance_from_adam(optim, args.delta, n_train)
@@ -140,90 +115,6 @@ def get_prediction_vars(optim, device):
     vars = get_pred_vars_optim(net, trainloader_vars, sigma_sqrs, device, tensor=True)
 
     return vars, optim
-
-def save_visualization(dataset, num_samples=1000, filename="dataset_plot.png"):
-    """Saves a 2D PyTorch dataset visualization to a file."""
-    
-    # Extract a subset of data
-    X, y = zip(*[dataset[i] for i in range(min(len(dataset), num_samples))])  
-    X = torch.stack(X)  # Ensure it's a tensor
-    y = torch.tensor(y)  # Ensure labels are tensor
-    
-    # Create plot
-    plt.figure(figsize=(8, 6))
-    scatter = plt.scatter(X[:, 0], X[:, 1], c=y.numpy(), cmap='tab10', alpha=0.5)
-    plt.colorbar(scatter, label="Class Labels")
-    plt.xlabel("Feature 1")
-    plt.ylabel("Feature 2")
-    plt.title("2D Visualization of Dataset")
-    
-    # Save image
-    save_path = os.path.join("./" + filename)
-    plt.savefig(save_path)
-    plt.close()
-    
-    return save_path
-
-def plot_contour(model, dataset, save_path="contour_plot.png", resolution=0.01, batch_size=10000):
-    model.eval()  # Set to evaluation mode
-
-    # Extract features and labels from dataset
-    X, y = zip(*dataset)
-    X = torch.stack(X).numpy()
-    y = torch.stack(y).numpy()
-
-    # Define the plot area
-    x_min, x_max = X[:, 0].min() - 1, X[:, 0].max() + 1
-    y_min, y_max = X[:, 1].min() - 1, X[:, 1].max() + 1
-
-    # Create a mesh grid over the feature space
-    xx, yy = np.meshgrid(
-        np.arange(x_min, x_max, resolution),
-        np.arange(y_min, y_max, resolution)
-    )
-
-    # Flatten grid
-    grid_points = np.c_[xx.ravel(), yy.ravel()]
-
-    # Move model to CPU to save CUDA memory
-    device = next(model.parameters()).device
-    model_cpu = model.to("cpu")
-
-    # Predict in batches to save memory
-    predictions = []
-    with torch.no_grad():
-        for i in range(0, len(grid_points), batch_size):
-            batch = torch.tensor(grid_points[i:i + batch_size], dtype=torch.float32)
-            batch_preds = model_cpu(batch).argmax(dim=1).numpy()
-            predictions.append(batch_preds)
-
-    # Combine results
-    Z = np.concatenate(predictions).reshape(xx.shape)
-
-    # Move model back to its original device
-    model.to(device)
-
-    # Plot decision boundary
-    plt.figure(figsize=(8, 6))
-    plt.contourf(xx, yy, Z, alpha=0.3, cmap=plt.cm.Paired)  # Smooth filled contour
-    plt.contour(xx, yy, Z, colors='black', linewidths=1, alpha=0.7)  # Clear boundary lines
-
-    # Scatter plot of actual data points
-    scatter = plt.scatter(X[:, 0], X[:, 1], c=y, cmap=plt.cm.Paired, edgecolors='white', alpha=0.5)
-
-    # Add legend and labels
-    plt.colorbar(scatter)
-    plt.xlabel('t-SNE Dim 1')
-    plt.ylabel('t-SNE Dim 2')
-    plt.title('Decision Boundary of Multi-Class Classifier')
-
-    # Save the plot instead of showing it
-    plt.savefig(save_path, dpi=300, bbox_inches='tight')
-    plt.close()
-
-    print(f"Contour plot saved as {save_path}")
-
-    return xx, yy, Z
 
 def compute_labelnoise(train_loader, model, optimizer, device, num_classes, train_num, batch_size, mc):
     model.eval()
@@ -322,15 +213,13 @@ if __name__ == "__main__":
     output_file = os.path.join(output_dir, f"{args.name_exp}_ls_exp.h5")
 
     # Data
-    ds_train, ds_test, transform_train = get_dataset(args.dataset, return_transform=True, noise=args.moon_noise)
+    ds_train, ds_test, transform_train = get_dataset(args.dataset, return_transform=True)
     input_size = ds_train[0][0].numel()
     nc = len(torch.unique(torch.asarray([target for _, target in ds_train])))
     tr_targets = torch.asarray([target for _, target in ds_train])
     te_targets = torch.asarray([target for _, target in ds_test])
     n_train = len(ds_train)
     n_samples = len(ds_train)
-    #usage: For quick look at how your data look on 2D plane
-    #save_visualization(ds_train)
 
     # Model
     net = get_model(args.model, nc, input_size, device, seed)
@@ -349,6 +238,22 @@ if __name__ == "__main__":
 
     # Learning rate scheduler
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=args.epochs)
+
+    config = {
+        "input_size": input_size,
+        "nc": int(nc.item()) if isinstance(nc, torch.Tensor) else nc,
+        "model": args.model,
+        "dataset": args.dataset,
+        "device": device,
+        "optimizer": args.optimizer,
+        "optimizer_params": {
+            key: value
+            for key, value in vars(args).items()
+            if (key.startswith('lr') or key.startswith('delta') or key.startswith('hess_init'))
+        },
+        "max_epochs": args.epochs,
+        "loss_criterion": "CrossEntropyLoss",
+    }
 
     residual_upper, leverage_upper = 0.,0.
 
@@ -411,22 +316,6 @@ if __name__ == "__main__":
     index=list(range(n_samples))
     labels = tr_targets
 
-    config = {
-        "input_size": input_size,
-        "nc": int(nc.item()) if isinstance(nc, torch.Tensor) else nc,
-        "model": args.model,
-        "dataset": args.dataset,
-        "device": device,
-        "optimizer": args.optimizer,
-        "optimizer_params": {
-            key: value
-            for key, value in vars(args).items()
-            if (key.startswith('lr') or key.startswith('delta') or key.startswith('hess_init'))
-        },
-        "max_epochs": args.epochs,
-        "loss_criterion": "CrossEntropyLoss",
-    }
-
     config_json = json.dumps(config)
 
     with h5py.File(output_file, 'w') as f:
@@ -439,40 +328,3 @@ if __name__ == "__main__":
         config_group.create_dataset('config_data', data=config_json)
         
     print(f"Saved MNIST images, labels, and noise values to {output_file}")
-
-    sort_noises,index,labels=zip(*sorted(zip(all_noise,index,labels),reverse=True))
-
-    linewidth = 5
-    fontsize = 20
-
-    ls_noise = [0.01] * num_classes
-    ls_noise[0] = -0.09
-
-    ls_noise = np.linalg.norm(ls_noise,2)
-
-    fig, ax = plt.subplots(figsize=(8, 6))
-    print(ls_noise)
-
-    ax.plot(sort_noises, label = 'IVON',color='red', linewidth=linewidth )
-    ax.plot([ls_noise for i in range(len(sort_noises))], label = 'Label Smoothing', linestyle='dashed', color='gray',linewidth=linewidth)
-
-    # Remove the x-axis ticks
-    plt.xticks([])
-    plt.yticks([0.1, 0.3, 0.5],fontsize=15)
-    ax.tick_params(axis='both', which='major', labelsize=15, labelcolor='dimgray')
-
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.spines['bottom'].set_color('dimgray')
-    ax.spines['left'].set_color('dimgray')
-
-    # Optionally, you can also remove the x-axis label or customize it further
-    plt.xlabel('Examples',fontsize=fontsize)
-    plt.ylabel(r'Label Noise $\|\epsilon\|_2$',fontsize=fontsize)
-
-    plt.legend(loc = 'upper right',fontsize=15)
-
-    # Show the plot
-    plt.savefig('./noise_distirbution.pdf')
-    plt.savefig('./noise_distirbution.png',dpi=600)
-    #plt.show()
