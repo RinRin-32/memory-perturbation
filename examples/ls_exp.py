@@ -37,14 +37,12 @@ def get_args():
     parser.add_argument('--name_exp', default='visualizer', type=str, help='name of experiment')
 
     # Data, Model
-    parser.add_argument('--dataset', default='MOON', choices=['MNIST', 'FMNIST', 'CIFAR10', 'MOON', 'MNIST_REDUX'])
-    parser.add_argument('--moon_noise', default = 0.2, type=float, help='desired noise for moon')
+    parser.add_argument('--dataset', default='MNIST', choices=['MNIST', 'FMNIST', 'CIFAR10'])
     parser.add_argument('--model', default='small_mlp',choices=['large_mlp', 'lenet', 'small_mlp', 'cnn_deepobs', 'nn', 'linear_model', 'resnet34'])
 
     # Optimization
     parser.add_argument('--optimizer', default='iblr', choices=['iblr', 'adam'])
     parser.add_argument('--lr', default=0.01, type=float, help='learning rate')
-    parser.add_argument('--lrmin', default=0.0, type=float, help='min learning rate of scheduler')
     parser.add_argument('--bs', default=256, type=int, help='batch size')
     parser.add_argument('--epochs', default=30, type=int, help='number of epochs')
     parser.add_argument('--delta', default=60, type=float, help='L2-regularization parameter')
@@ -54,15 +52,8 @@ def get_args():
     # IBLR
     parser.add_argument('--hess_init', default=0.1, type=float, help='Hessian initialization')
 
-    # Retraining
-    parser.add_argument('--lrmin_retrain', default=0.0, type=float, help='retraining: min learning rate scheduler')
-    parser.add_argument('--n_retrain', default=800, type=int, help='number of retrained examples')
-
     # Variance computation
     parser.add_argument('--bs_jacs', default=50, type=int, help='Jacobian batch size for variance computation')
-
-    # logging
-    parser.add_argument('--log_step', default = 1, type=int, help='1 equates to logging on every step')
 
     return parser.parse_args()
 
@@ -365,11 +356,32 @@ if __name__ == "__main__":
     penultimate_features_list = []
     labels_list = []
 
+    residual_upper, leverage_upper = 0.,0.
+    test_nll_lst, loocv_lst = [], []
+
     for epoch in tqdm.tqdm(list(range(args.epochs))):
         if args.optimizer == 'iblr':
             net, optim = train_one_epoch_iblr(net, optim, device)
         else:
             net, optim = train_one_epoch_sgd_adam(net, optim, device)
+
+        test_acc, test_nll = predict_test(net, testloader_eval, nc, te_targets, device)
+        test_nll_lst.append(test_nll)
+    
+    residuals, probs, logits, nll_hess, train_acc, train_nll = predict_nll_hess(net, trainloader_eval, nc, tr_targets, device)
+
+    vars, optim = get_prediction_vars(optim, device)
+
+    # Evaluate memory map criteria
+    residuals_summary = torch.sqrt(torch.sum(residuals**2, dim=1)).detach().numpy() # l2norm
+    lev_scores_full = torch.einsum('nij,nji->ni', vars, nll_hess)
+    lev_scores_full = torch.clamp(lev_scores_full, 0.)
+    lev_scores_summary = torch.sqrt(torch.sum(lev_scores_full**2, dim=1)).cpu().detach().numpy()
+
+    leverage_upper = lev_scores_summary.max() if lev_scores_summary.max() > leverage_upper else leverage_upper
+    residual_upper = residuals_summary.max() if residuals_summary.max() > residual_upper else residual_upper
+    
+    w_star = parameters_to_vector(net.parameters()).detach().cpu().clone()
 
     # Evaluate on training data; residuals and lambdas
     residuals, probs, lambdas, train_acc, train_nll = predict_train2(net, trainloader_eval, nc, tr_targets, device)
@@ -379,7 +391,12 @@ if __name__ == "__main__":
     test_acc, test_nll = predict_test(net, testloader_eval, nc, te_targets, device)
     print(f"Test Acc: {(100 * test_acc):>0.2f}%, Test NLL: {test_nll:>6f}")
 
-    net.eval()
+    # Compute prediction variances
+    vars = get_pred_vars_laplace(net, trainloader_vars, args.delta, nc, device, version='kfac')
+
+    # Compute and store sensitivities
+    sensitivities = np.asarray(residuals) * np.asarray(lambdas) * np.asarray(vars)
+    sensitivities = np.sum(np.abs(sensitivities), axis=-1)
 
     num_classes = 10 
     all_noise, _ = compute_labelnoise(vis_loader, net, optim, device, num_classes, n_samples, args.bs, mc_samples)
@@ -395,10 +412,32 @@ if __name__ == "__main__":
     index=list(range(n_samples))
     labels = tr_targets
 
+    config = {
+        "input_size": input_size,
+        "nc": int(nc.item()) if isinstance(nc, torch.Tensor) else nc,
+        "model": args.model,
+        "dataset": args.dataset,
+        "device": device,
+        "optimizer": args.optimizer,
+        "optimizer_params": {
+            key: value
+            for key, value in vars(args).items()
+            if (key.startswith('lr') or key.startswith('delta') or key.startswith('hess_init'))
+        },
+        "max_epochs": args.epochs,
+        "loss_criterion": "CrossEntropyLoss",
+    }
+
+    config_json = json.dumps(config)
+
     with h5py.File(output_file, 'w') as f:
+        f.create_dataset("bpe", data=np.array(residuals_summary))
+        f.create_dataset("bls", data=np.array(lev_scores_summary))
         f.create_dataset("images", data=torch.stack([ds_train[i][0] for i in index]).numpy())  # Save sorted images
         f.create_dataset("labels", data=np.array(labels))  # Sorted labels
         f.create_dataset("noise", data=np.array(all_noise))
+        config_group = f.create_group("config")
+        config_group.create_dataset('config_data', data=config_json)
         
     print(f"Saved MNIST images, labels, and noise values to {output_file}")
 
