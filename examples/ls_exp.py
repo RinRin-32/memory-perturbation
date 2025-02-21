@@ -43,8 +43,6 @@ def get_args():
     parser.add_argument('--epochs', default=30, type=int, help='number of epochs')
     parser.add_argument('--delta', default=60, type=float, help='L2-regularization parameter')
 
-    parser.add_argument('--ls', default=False, type=bool, help='traditional label smoothing')
-
     # IBLR
     parser.add_argument('--hess_init', default=0.1, type=float, help='Hessian initialization')
 
@@ -203,10 +201,8 @@ if __name__ == "__main__":
     print('device', device)
 
     # Loss
-    if args.ls:
-        criterion = nn.CrossEntropyLoss(label_smoothing=0.1).to(device)
-    else:
-        criterion = nn.CrossEntropyLoss().to(device)
+    
+    criterion = nn.CrossEntropyLoss().to(device)
 
     output_dir = "h5_files/"
     os.makedirs(output_dir, exist_ok=True)
