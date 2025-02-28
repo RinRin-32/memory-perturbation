@@ -20,9 +20,11 @@ from ivon import IVON as IBLR
 sys.path.append("..")
 from lib.models import get_model
 from lib.datasets import get_dataset
-from lib.utils import get_quick_loader, predict_test, flatten, predict_nll_hess, predict_train2
+from lib.utils import get_quick_loader, predict_test, flatten, predict_nll_hess, predict_train2, get_estimated_nll
 from lib.variances import get_covariance_from_iblr, get_covariance_from_adam, get_pred_vars_optim, get_pred_vars_laplace
 import matplotlib.pyplot as plt
+
+## NEED TO SAVE THE IMAGES SOMEHOW
 
 
 def get_args():
@@ -32,7 +34,7 @@ def get_args():
     parser.add_argument('--name_exp', default='visualizer', type=str, help='name of experiment')
 
     # Data, Model
-    parser.add_argument('--dataset', default='MOON', choices=['MNIST', 'FMNIST', 'CIFAR10', 'MOON', 'MNIST_REDUX'])
+    parser.add_argument('--dataset', default='MOON', choices=['MNIST', 'FMNIST', 'CIFAR10', 'MOON'])
     parser.add_argument('--moon_noise', default = 0.2, type=float, help='desired noise for moon')
     parser.add_argument('--model', default='small_mlp',choices=['large_mlp', 'lenet', 'small_mlp', 'cnn_deepobs', 'nn', 'linear_model'])
 
@@ -239,7 +241,7 @@ if __name__ == "__main__":
     h5py.File(output_file, "w")
 
     # Data
-    if args.dataset != 'MOON' and args.dataset != 'MNIST_REDUX':
+    if args.dataset != 'MOON':
         ds_train, ds_test, transform_train = get_dataset(args.dataset, return_transform=True)
         input_size = len(ds_train.data[0, :])**2
         nc = max(ds_train.targets) + 1
@@ -251,6 +253,7 @@ if __name__ == "__main__":
         tr_targets = torch.asarray([target for _, target in ds_train])
         te_targets = torch.asarray([target for _, target in ds_test])
     n_train = len(ds_train)
+    print(n_train)
     #usage: For quick look at how your data look on 2D plane
     #save_visualization(ds_train)
 
@@ -277,7 +280,7 @@ if __name__ == "__main__":
     # Open the file in read/write mode
     with h5py.File(output_file, 'r+') as f:
         # Check if the 'coord' group exists, create it if not
-        if 'coord' not in f and (args.dataset == 'MOON' or args.dataset == 'MNIST_REDUX'):
+        if 'coord' not in f and (args.dataset == 'MOON'):
             scores_group = f.create_group('coord')
             x_coord = scores_group.create_dataset('X_train', data=ds_train.tensors[0])
             y_coord = scores_group.create_dataset('y_train', data=ds_train.tensors[1])
@@ -292,6 +295,10 @@ if __name__ == "__main__":
 
             x_coord = scores_group.create_dataset('X_train', data=ds_train.tensors[0])
             y_coord = scores_group.create_dataset('y_train', data=ds_train.tensors[1])
+        elif 'dataset' not in f:
+            data_group = f.create_group('dataset')
+            images = data_group.create_dataset('images', data=torch.stack([ds_train[i][0] for i in range(n_train)]).numpy())
+            label = data_group.create_dataset('labels', data=np.array(tr_targets))
 
     for epoch in tqdm.tqdm(list(range(args.epochs))):
         if args.optimizer == 'iblr':
@@ -357,18 +364,6 @@ if __name__ == "__main__":
                                 'decision_boundary': decision_boundary,
                                 'average_marginal': avg_vars,
                                 'average_lambda': avg_lambda}
-                elif args.dataset == 'MNIST_REDUX':
-                    xx, yy, Z = plot_contour(net, ds_train)
-                    decision_boundary = {"xx": xx, "yy": yy, "Z": Z}
-
-                    scores_dict = {
-                                'sensitivities': sensitivities,
-                                'bpe': residuals_summary,
-                                'bls': lev_scores_summary,
-                                'decision_boundary': decision_boundary,
-                                'average_marginal': avg_vars,
-                                'average_lambda': avg_lambda
-                    }
                 else:
                     scores_dict = {'sensitivities': sensitivities,
                                 'bpe': residuals_summary,
@@ -433,7 +428,7 @@ if __name__ == "__main__":
             idx_removed = indices_retrain[i]
             idx_remain = np.setdiff1d(np.arange(0, n_train), idx_removed)
 
-            if args.dataset == "MOON" or args.dataset == 'MNIST_REDUX':
+            if args.dataset == "MOON":
                 X_removed = ds_train[idx_removed][0].tolist()
                 ds_train_perturbed_list = [
                     (x.tolist(), y)
@@ -481,7 +476,7 @@ if __name__ == "__main__":
 
                     net.eval()
                     with torch.no_grad():
-                        if args.dataset == "MOON" or args.dataset == 'MNIST_REDUX':
+                        if args.dataset == "MOON":
                             logits_wminus = net(X_removed.to(device))
                         else:
                             if device == "cuda":
