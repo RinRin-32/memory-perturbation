@@ -262,6 +262,14 @@ if __name__ == "__main__":
     all_result = {}
 
     for epoch in tqdm.tqdm(list(range(args.epochs))):
+        num_classes = 10 
+        all_noise, _ = compute_labelnoise(vis_loader, net, optim, device, num_classes, n_samples, args.bs, mc_samples)
+
+        all_noise = [np.linalg.norm(x,2) for x in all_noise]
+
+        index=list(range(n_samples))
+        labels = tr_targets
+
         if args.optimizer == 'iblr':
             net, optim = train_one_epoch_iblr(net, optim, device)
         else:
@@ -298,14 +306,6 @@ if __name__ == "__main__":
         # Compute and store sensitivities
         sensitivities = np.asarray(residuals) * np.asarray(lambdas) * np.asarray(vars)
         sensitivities = np.sum(np.abs(sensitivities), axis=-1)
-
-        num_classes = 10 
-        all_noise, _ = compute_labelnoise(vis_loader, net, optim, device, num_classes, n_samples, args.bs, mc_samples)
-
-        all_noise = [np.linalg.norm(x,2) for x in all_noise]
-
-        index=list(range(n_samples))
-        labels = tr_targets
 
         estimated_nll = get_estimated_nll(nc, np.array([residuals]), np.array([vars]), logits, tr_targets)
         print(estimated_nll)
