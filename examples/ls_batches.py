@@ -417,7 +417,7 @@ if __name__ == "__main__":
                 optim.step()
                 running_loss += loss.item()
                 scheduler.step()
-            curr += 1
+                curr += 1
         #raise RuntimeError(len(update_list), n_train)
 
         #if args.optimizer == 'iblr':
@@ -466,4 +466,4 @@ if __name__ == "__main__":
                 else:
                     epoch_group.create_dataset(key, data=value)
             
-    print(f"Saved MNIST images, labels, and noise values to {output_file}")
+    print(f"Saved images, labels, and noise values to {output_file}")
