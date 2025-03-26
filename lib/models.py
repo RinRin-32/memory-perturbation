@@ -15,6 +15,8 @@ def get_model(model_name, nc, input_size, device, seed):
         net = MLP(input_size, hidden_sizes, nc).to(device)
     elif model_name == 'nn':
         net = NeuralNetwork().to(device)
+    elif model_name == 'nn_single':
+        net = NeuralNetSingle().to(device)
     elif model_name == 'lenet':
         net = LeNet5(output_size=nc).to(device)
     elif model_name == 'linear_model':
@@ -168,6 +170,21 @@ class NeuralNetwork(nn.Module):
         x = self.relu(self.layer2(x))
         x = self.layer3(x)
         return x
+    
+class NeuralNetSingle(nn.Module):
+    def __init__(self):
+        super(NeuralNetSingle, self).__init__()
+        self.relu = nn.Tanh()
+        self.layer1 = nn.Linear(2, 100)
+        self.layer2 = nn.Linear(100, 10)
+        self.layer3 = nn.Linear(10, 1)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        x = self.relu(self.layer1(x))
+        x = self.relu(self.layer2(x))
+        x = self.layer3(x)
+        return self.sigmoid(x), x
     
 class LinearModel(nn.Module):
     def __init__(self):
