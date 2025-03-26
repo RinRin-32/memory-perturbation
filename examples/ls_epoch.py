@@ -156,7 +156,7 @@ def get_optimizer():
     elif args.optimizer == 'adamw':
         optim = AdamW(net.parameters(), lr=args.lr, weight_decay=args.delta / n_train)
     elif args.optimizer == 'iblr':
-        optim = IBLR(net.parameters(), lr=args.lr, mc_samples=4, ess=n_train, weight_decay=1e-3,
+        optim = IBLR(net.parameters(), lr=args.lr, mc_samples=1, ess=n_train, weight_decay=1e-3,
                       beta1=0.9, beta2=0.99999, hess_init=args.hess_init)
     elif args.optimizer == 'sgd':
         optim = SGD(net.parameters(), lr=args.lr, momentum=0.9)
@@ -292,7 +292,7 @@ if __name__ == "__main__":
     # Optimizer
     optim = get_optimizer()
 
-    mc_samples = 4
+    mc_samples = 1
 
     # Learning rate scheduler
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=args.epochs)

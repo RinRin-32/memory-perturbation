@@ -99,7 +99,7 @@ def get_optimizer(retrain=False):
     if args.optimizer == 'adam':
         optim = Adam(net.parameters(), lr=lr, weight_decay=0)
     elif args.optimizer == 'iblr':
-        optim = IBLR(net.parameters(), lr=lr, mc_samples=4, ess=n_train, weight_decay=1e-3,
+        optim = IBLR(net.parameters(), lr=lr, mc_samples=1, ess=n_train, weight_decay=1e-3,
                       beta1=0.9, beta2=0.99999, hess_init=args.hess_init)
     else:
         raise NotImplementedError
