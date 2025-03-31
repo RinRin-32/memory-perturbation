@@ -299,13 +299,16 @@ if __name__ == "__main__":
         for _ in range(mc_samples):
             for X, y in trainloader:
                 num_classes = nc
-                all_noise = induced_label_noise(optim, net, vis_loader, n_train, 2, args.bs)
+                all_noise = induced_label_noise(optim, net, vis_loader, n_train, nc, args.bs)
 
                 logits_all, sig_input = extract_sigmoid(optim, net, vis_loader, n_train, args.bs)
 
                 induced_noise = all_noise
 
                 all_noise = [np.linalg.norm(x,2) for x in all_noise]
+
+                index=list(range(n_samples))
+                labels = tr_targets
 
                 if args.dataset == 'MOON':
                     xx, yy, Z = plot_contour(net, ds_train)
@@ -323,6 +326,8 @@ if __name__ == "__main__":
                     scores_dict = {
                         'noise': all_noise,
                         'all_noise': induced_noise,
+                        'logits': logits_all,
+                        'sig_input': sig_input
                     }
                 result_dict = {
                     'step': curr,
@@ -351,6 +356,9 @@ if __name__ == "__main__":
             coord_group = f.create_group('coord')
             x_coord = coord_group.create_dataset('X_train', data=ds_train.tensors[0])
             y_coord = coord_group.create_dataset('y_train', data=ds_train.tensors[1])
+        else:
+            f.create_dataset("images", data=torch.stack([ds_train[i][0] for i in index]).numpy())  # Save sorted images
+            f.create_dataset("labels", data=np.array(labels))  # Sorted labels
 
         config_group = f.create_group("config")
         config_group.create_dataset('config_data', data=config_json)
