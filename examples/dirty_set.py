@@ -182,20 +182,20 @@ def get_prediction_vars(optim, device):
 
     return vars, optim
 
-def make_dirty_dataset(ds_train, noise_rate=0.2):
-    """Creates a dirty version of ds_train by flipping labels at a given noise rate."""
-    ds_dirty = list(ds_train)  # Copy the dataset
-    
+def make_dirty_dataset_from_sensitivities(ds_train, sensitivities, noise_rate=0.2):
+    ds_dirty = list(ds_train)  # copy
     num_samples = len(ds_dirty)
-    num_noisy = int(noise_rate * num_samples)  # Number of samples to relabel
-    
-    indices = random.sample(range(num_samples), num_noisy)  # Random indices to corrupt
-    all_classes = list(set(target for _, target in ds_dirty))  # Unique classes
+    num_noisy = int(noise_rate * num_samples)
 
-    for idx in indices:
+    # Get indices of top-N most sensitive points
+    sorted_indices = np.argsort(-sensitivities)  # descending
+    noisy_indices = sorted_indices[:num_noisy]
+
+    all_classes = list(set(target for _, target in ds_dirty))
+    for idx in noisy_indices:
         _, original_label = ds_dirty[idx]
-        new_label = random.choice([c for c in all_classes if c != original_label])  # Ensure different class
-        ds_dirty[idx] = (ds_dirty[idx][0], new_label)  # Replace with new label
+        new_label = random.choice([c for c in all_classes if c != original_label])
+        ds_dirty[idx] = (ds_dirty[idx][0], new_label)
     
     return ds_dirty
 
@@ -239,12 +239,8 @@ if __name__ == "__main__":
     # Model
     net = get_model(args.model, nc, input_size, device, seed)
 
-    ds_dirty = make_dirty_dataset(ds_train, noise_rate=0.2)
-    dirty_tr_targets = torch.asarray([target for _, target in ds_dirty])
     # Dataloaders
     trainloader = get_quick_loader(DataLoader(ds_train, batch_size=args.bs), device=device) # training
-    dirty_trainloader = get_quick_loader(DataLoader(ds_dirty, batch_size=args.bs), device=device) # dirty train loader
-    dirty_trainloder_eval = DataLoader(ds_dirty, batch_size=args.bs, shuffle=False)
     trainloader_eval = DataLoader(ds_train, batch_size=args.bs, shuffle=False) # train evaluation
     testloader_eval = DataLoader(ds_test, batch_size=args.bs, shuffle=False) # test evaluation
     trainloader_vars = DataLoader(ds_train, batch_size=args.bs_jacs, shuffle=False) # variance computation
@@ -337,6 +333,11 @@ if __name__ == "__main__":
     net = get_model(args.model, nc, input_size, device, seed)
     optim = get_optimizer()
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=args.epochs)
+
+    ds_dirty = make_dirty_dataset_from_sensitivities(ds_train, noise_rate=0.3, sensitivities=sensitivities)
+    dirty_tr_targets = torch.asarray([target for _, target in ds_dirty])
+    dirty_trainloader = get_quick_loader(DataLoader(ds_dirty, batch_size=args.bs), device=device) # dirty train loader
+    dirty_trainloder_eval = DataLoader(ds_dirty, batch_size=args.bs, shuffle=False)
 
     for epoch in tqdm.tqdm(list(range(args.epochs))):
         if args.optimizer == 'iblr':
