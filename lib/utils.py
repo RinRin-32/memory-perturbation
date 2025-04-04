@@ -68,7 +68,7 @@ def train_model(net, criterion, optim, scheduler, trainloader, epochs, N, delta,
 def get_estimated_nll(nc, residuals, vars, logits, all_targets, eps=1e-10, loco=False):
     sensitivities = residuals * vars
     logits_perturbed = sensitivities + logits
-    probs_perturbed = torch.softmax(torch.from_numpy(logits_perturbed), dim=-1)
+    probs_perturbed = torch.softmax(torch.from_numpy(np.asarray(logits_perturbed)), dim=-1)
 
     if loco:
         estimated_nll = - torch.sum((torch.log(probs_perturbed.clamp(min=eps)).cpu() * F.one_hot(all_targets, nc).cpu()),dim=1).mean().numpy()
@@ -138,7 +138,7 @@ def predict_train2(net, loader, nc, all_targets, device, return_logits=False, ep
         train_nll = - torch.sum((torch.log(probs_list.clamp(min=eps)).cpu() * F.one_hot(all_targets, nc).cpu()),dim=1).mean().numpy()
 
         if return_logits:
-            return res_list.tolist(), np.asarray(probs_list.tolist()), lams_list.tolist(), logits_list.tolist(), train_acc, train_nll
+            return res_list.tolist(), np.asarray(probs_list.tolist()), lams_list.tolist(), np.asarray(logits_list), train_acc, train_nll
         else:
             return res_list.tolist(), np.asarray(probs_list.tolist()), lams_list.tolist(), train_acc, train_nll
 
