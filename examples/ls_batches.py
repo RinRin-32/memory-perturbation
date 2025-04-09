@@ -151,13 +151,13 @@ def train_one_epoch_sgd_adam(net, optim, device):
     scheduler.step()
     return net, optim
 
-def get_optimizer():
+def get_optimizer(mc_samples = 1):
     if args.optimizer == 'adam':
         optim = Adam(net.parameters(), lr=args.lr, weight_decay=0)
     elif args.optimizer == 'adamw':
         optim = AdamW(net.parameters(), lr=args.lr, weight_decay=args.delta / n_train)
     elif args.optimizer == 'iblr':
-        optim = IBLR(net.parameters(), lr=args.lr, mc_samples=1, ess=n_train, weight_decay=1e-3,
+        optim = IBLR(net.parameters(), lr=args.lr, mc_samples=mc_samples, ess=n_train, weight_decay=1e-3,
                       beta1=0.9, beta2=0.99999, hess_init=args.hess_init)
     elif args.optimizer == 'sgd':
         optim = SGD(net.parameters(), lr=args.lr, momentum=0.9)
@@ -275,8 +275,12 @@ if __name__ == "__main__":
     ds_train, ds_test, transform_train = get_dataset(args.dataset, return_transform=True, noise=0.05, n_samples=1000)
     input_size = ds_train[0][0].numel()
     nc = len(torch.unique(torch.asarray([target for _, target in ds_train])))
-    tr_targets = torch.asarray([target for _, target in ds_train])
-    te_targets = torch.asarray([target for _, target in ds_test])
+    if args.dataset == 'MOON':
+        tr_targets = torch.asarray([target for _, target in ds_train])
+        te_targets = torch.asarray([target for _, target in ds_test])
+    else:
+        tr_targets, te_targets = torch.asarray(ds_train.targets).to(device), torch.asarray(ds_test.targets).to(device)
+
     n_train = len(ds_train)
     n_samples = len(ds_train)
 
@@ -291,9 +295,9 @@ if __name__ == "__main__":
 
     vis_loader = DataLoader(dataset=ds_train, batch_size=args.bs, shuffle=False)
     # Optimizer
-    optim = get_optimizer()
 
-    mc_samples = 1
+    mc_samples = 100
+    optim = get_optimizer(mc_samples)
 
     # Learning rate scheduler
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=args.epochs)
@@ -330,94 +334,68 @@ if __name__ == "__main__":
 
     for epoch in tqdm.tqdm(list(range(args.epochs+1))):
         running_loss = 0
-        for _ in range(mc_samples):
-            for X, y in trainloader:
-                num_classes = nc
-                all_noise, _ = compute_labelnoise(vis_loader, net, optim, device, num_classes, n_samples, args.bs, mc_samples)
+        for X, y in trainloader:
+            num_classes = nc
+            all_noise, _ = compute_labelnoise(vis_loader, net, optim, device, num_classes, n_samples, args.bs, mc_samples)
+            induced_noise = all_noise
 
-                induced_noise = all_noise
+            all_noise = [np.linalg.norm(x,2) for x in all_noise]
 
-                all_noise = [np.linalg.norm(x,2) for x in all_noise]
+            index=list(range(n_samples))
+            labels = tr_targets
 
-                index=list(range(n_samples))
-                labels = tr_targets
-
-                if args.dataset == 'MOON':
+            if args.dataset == 'MOON':
                     xx, yy, Z = plot_contour(net, ds_train)
                     decision_boundary = {"xx": xx, "yy": yy, "Z": Z}
 
-                test_acc, test_nll = predict_test(net, testloader_eval, nc, te_targets, device)
-            
-                residuals, probs, logits, nll_hess, train_acc, train_nll = predict_nll_hess(net, trainloader_eval, nc, tr_targets, device)
+            # Evaluate on training data; residuals and lambdas
+            residuals, probs, lambdas, logits, train_acc, train_nll = predict_train2(net, trainloader_eval, nc, tr_targets.cpu(), device, return_logits=True)
+            print(f"Train Acc: {(100 * train_acc):>0.2f}%, Train NLL: {train_nll:>6f}")
 
-                vars, optim = get_prediction_vars(optim, device)
+            # Evaluate on test data
+            test_acc, test_nll = predict_test(net, testloader_eval, nc, te_targets, device)
+            print(f"Test Acc: {(100 * test_acc):>0.2f}%, Test NLL: {test_nll:>6f}")
 
-                # Evaluate memory map criteria
-                residuals_summary = torch.sqrt(torch.sum(residuals**2, dim=1)).detach().numpy() # l2norm
-                lev_scores_full = torch.einsum('nij,nji->ni', vars, nll_hess)
-                lev_scores_full = torch.clamp(lev_scores_full, 0.)
-                lev_scores_summary = torch.sqrt(torch.sum(lev_scores_full**2, dim=1)).cpu().detach().numpy()
-
-                leverage_upper = lev_scores_summary.max() if lev_scores_summary.max() > leverage_upper else leverage_upper
-                residual_upper = residuals_summary.max() if residuals_summary.max() > residual_upper else residual_upper
-                
-                w_star = parameters_to_vector(net.parameters()).detach().cpu().clone()
-
-                # Evaluate on training data; residuals and lambdas
-                residuals, probs, lambdas, logits, train_acc, train_nll = predict_train2(net, trainloader_eval, nc, tr_targets, device, return_logits=True)
-                #print(f"Train Acc: {(100 * train_acc):>0.2f}%, Train NLL: {train_nll:>6f}")
-
-                # Evaluate on test data
-                test_acc, test_nll = predict_test(net, testloader_eval, nc, te_targets, device)
-                #print(f"Test Acc: {(100 * test_acc):>0.2f}%, Test NLL: {test_nll:>6f}")
-
-                # Compute prediction variances
-                vars = get_pred_vars_laplace(net, trainloader_vars, args.delta, nc, device, version='kfac')
-
-                # Compute and store sensitivities
-                sensitivities = np.asarray(residuals) * np.asarray(lambdas) * np.asarray(vars)
-                sensitivities = np.sum(np.abs(sensitivities), axis=-1)
-
-                estimated_nll = get_estimated_nll(nc, np.array([residuals]), np.array([vars]), logits, tr_targets)
-                #print(estimated_nll)
-
-                if args.dataset == 'MOON':
-                    scores_dict = {
-                        'sensitivities': sensitivities,
-                        'bpe': residuals_summary,
-                        'bls': lev_scores_summary,
+            if args.dataset == 'MOON':
+                scores_dict = {
+                        #'sensitivities': sensitivities,
+                        #'bpe': residuals_summary,
+                        #'bls': lev_scores_summary,
                         'noise': all_noise,
                         'all_noise': induced_noise,
                         'decision_boundary': decision_boundary
                     }
-                else:
-                    scores_dict = {
-                        'sensitivities': sensitivities,
-                        'bpe': residuals_summary,
-                        'bls': lev_scores_summary,
+            else:
+                scores_dict = {
+                        #'sensitivities': sensitivities,
+                        #'bpe': residuals_summary,
+                        #'bls': lev_scores_summary,
                         'noise': all_noise,
                         'all_noise': induced_noise,
                     }
-                result_dict = {
+            result_dict = {
                     'step': curr,
                     'test_acc': test_acc,
                     'test_nll': test_nll,
-                    'estimated_nll': estimated_nll
+                    #'estimated_nll': estimated_nll
                 }
+        
+            all_scores[curr] = scores_dict
+            all_result[curr] = result_dict
 
-                all_scores[curr] = scores_dict
-                all_result[curr] = result_dict
-                net.train()
+            net.train()
+            losses = []
+            for _ in range(mc_samples):
                 X, y = X.to(device), y.to(device)
                 with optim.sampled_params(train=True):
                     optim.zero_grad()
                     fs = net(X)
                     loss = criterion(fs, y)
                     loss.backward()
-                optim.step()
-                running_loss += loss.item()
-                scheduler.step()
-                curr += 1
+            optim.step()
+            running_loss += loss.item()
+            scheduler.step()
+            curr += 1
         #raise RuntimeError(len(update_list), n_train)
 
         #if args.optimizer == 'iblr':
@@ -434,7 +412,7 @@ if __name__ == "__main__":
             y_coord = coord_group.create_dataset('y_train', data=ds_train.tensors[1])
         else:
             f.create_dataset("images", data=torch.stack([ds_train[i][0] for i in index]).numpy())  # Save sorted images
-            f.create_dataset("labels", data=np.array(labels))  # Sorted labels
+            f.create_dataset("labels", data=np.array(labels.cpu()))  # Sorted labels
         config_group = f.create_group("config")
         config_group.create_dataset('config_data', data=config_json)
 

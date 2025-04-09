@@ -273,7 +273,7 @@ if __name__ == "__main__":
     residual_upper, leverage_upper = 0.,0.
     test_nll_lst, loocv_lst = [], []
 
-    for epoch in tqdm.tqdm(list(range(args.epochs))):
+    for epoch in tqdm.tqdm(list(range(args.epochs*2))):
         if args.optimizer == 'iblr':
             net, optim = train_one_epoch_iblr(net, optim, device, trainloader)
         else:
@@ -329,8 +329,9 @@ if __name__ == "__main__":
         clean_scores[epoch] = scores_dict
 
         
-        ''' # can do this if you want to show the model "forgetting"
+        # can do this if you want to show the model "forgetting"
         if epoch == args.epochs:
+            initial_ds_train = ds_train
             ds_dirty = make_dirty_dataset_from_sensitivities(ds_train, noise_rate=0.2, sensitivities=sensitivities)
             dirty_tr_targets = torch.asarray([target for _, target in ds_dirty])
             dirty_trainloader = get_quick_loader(DataLoader(ds_dirty, batch_size=args.bs), device=device) # dirty train loader
@@ -338,74 +339,7 @@ if __name__ == "__main__":
             trainloader = dirty_trainloader
             tr_targets = dirty_tr_targets
             trainloader_eval = dirty_trainloder_eval
-            ds_train = ds_dirty'''
-
-    #criterion = nn.CrossEntropyLoss().to(device)
-    net = get_model(args.model, nc, input_size, device, seed)
-    optim = get_optimizer()
-    #scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=args.epochs)
-
-    vector_to_parameters(w_star, net.parameters())
-    net = net.to(device)
-
-    ds_dirty = make_dirty_dataset_from_sensitivities(ds_train, noise_rate=0.2, sensitivities=sensitivities)
-    dirty_tr_targets = torch.asarray([target for _, target in ds_dirty])
-    dirty_trainloader = get_quick_loader(DataLoader(ds_dirty, batch_size=args.bs), device=device) # dirty train loader
-    dirty_trainloder_eval = DataLoader(ds_dirty, batch_size=args.bs, shuffle=False)
-
-    for epoch in tqdm.tqdm(list(range(args.epochs))):
-        if args.optimizer == 'iblr':
-            net, optim = train_one_epoch_iblr(net, optim, device, dirty_trainloader)
-        else:
-            net, optim = train_one_epoch_sgd_adam(net, optim, device, dirty_trainloader)
-
-        test_acc, test_nll = predict_test(net, testloader_eval, nc, te_targets, device)
-    
-        residuals, probs, logits, nll_hess, train_acc, train_nll = predict_nll_hess(net, dirty_trainloder_eval, nc, dirty_tr_targets, device)
-
-        vars, optim = get_prediction_vars(optim, device)
-
-        # Evaluate memory map criteria
-        residuals_summary = torch.sqrt(torch.sum(residuals**2, dim=1)).detach().numpy() # l2norm
-        lev_scores_full = torch.einsum('nij,nji->ni', vars, nll_hess)
-        lev_scores_full = torch.clamp(lev_scores_full, 0.)
-        lev_scores_summary = torch.sqrt(torch.sum(lev_scores_full**2, dim=1)).cpu().detach().numpy()
-
-        leverage_upper = lev_scores_summary.max() if lev_scores_summary.max() > leverage_upper else leverage_upper
-        residual_upper = residuals_summary.max() if residuals_summary.max() > residual_upper else residual_upper
-        
-        w_star = parameters_to_vector(net.parameters()).detach().cpu().clone()
-
-        # Evaluate on training data; residuals and lambdas
-        residual, probs, lambdas, logits, train_acc, train_nll = predict_train2(net, dirty_trainloder_eval, nc, dirty_tr_targets, device, return_logits=True)
-        print(f"Train Acc: {(100 * train_acc):>0.2f}%, Train NLL: {train_nll:>6f}")
-
-        # Evaluate on test data
-        test_acc, test_nll = predict_test(net, testloader_eval, nc, te_targets, device)
-        print(f"Test Acc: {(100 * test_acc):>0.2f}%, Test NLL: {test_nll:>6f}")
-
-        vars, optim = get_prediction_vars(optim, device)
-
-        #sensitivities = np.asarray(residuals) * np.asarray(lambdas) * np.asarray(vars)
-        #sensitivities = np.sum(np.abs(sensitivities), axis=-1)
-        vars_diag = vars.diagonal(dim1=1, dim2=2)
-        sensitivities = np.asarray(residuals) * np.asarray(lambdas) * np.asarray(vars_diag)
-        sensitivities = np.sum(np.abs(sensitivities), axis=-1)
-
-        if args.dataset == 'MOON':
-            xx, yy, Z = plot_contour(net, ds_train)
-            decision_boundary = {"xx": xx, "yy": yy, "Z": Z}
-            scores_dict = {
-                        'sensitivities': sensitivities,
-                        'decision_boundary': decision_boundary,
-                        'bpe': residuals_summary,
-                        'bls': lev_scores_summary}
-        else:
-            scores_dict = {'sensitivities': sensitivities,
-                           'bpe': residuals_summary,
-                           'bls': lev_scores_summary}
-
-        dirty_scores[epoch] = scores_dict
+            ds_train = ds_dirty
 
     X_dirty = torch.stack([x for x, _ in ds_dirty])  # Stack inputs into a single tensor
     y_dirty = torch.tensor([y for _, y in ds_dirty])  # Convert labels to a tensor
@@ -413,8 +347,8 @@ if __name__ == "__main__":
     with h5py.File(output_file, 'w') as f:
         if args.dataset == 'MOON':
             coord_group = f.create_group('coord')
-            x_coord = coord_group.create_dataset('X_train', data=ds_train.tensors[0])
-            y_coord = coord_group.create_dataset('y_train', data=ds_train.tensors[1])
+            x_coord = coord_group.create_dataset('X_train', data=initial_ds_train.tensors[0])
+            y_coord = coord_group.create_dataset('y_train', data=initial_ds_train.tensors[1])
             x_coord_dirty = coord_group.create_dataset('X_train_dirty', data=X_dirty)
             y_coord_dirty = coord_group.create_dataset('y_train_dirty', data=y_dirty)
         config_group = f.create_group("config")
@@ -433,19 +367,5 @@ if __name__ == "__main__":
                         sub_group.create_dataset(sub_key, data=sub_value)
                 else:
                     epoch_group.create_dataset(key, data=value)
-
-        result_group = f.create_group('dirty_scores')
-
-        for epoch, data in dirty_scores.items():
-            epoch_group_name = f"epoch_{epoch}"
-            epoch_group = result_group.create_group(epoch_group_name)
-
-            for key, value in data.items():
-                if isinstance(value, dict):
-                    sub_group = epoch_group.create_group(key) if key not in epoch_group else epoch_group[key]
-                    for sub_key, sub_value in value.items():
-                        sub_group.create_dataset(sub_key, data=sub_value)
-                else:
-                    epoch_group.create_dataset(key, data=value)
             
-    print(f"Saved clean/dirty test at {output_file}")
+    print(f"Saved rapid forgetting test at {output_file}")

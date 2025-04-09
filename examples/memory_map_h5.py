@@ -16,7 +16,7 @@ from ivon import IVON as IBLR
 sys.path.append("..")
 from lib.models import get_model
 from lib.datasets import get_dataset
-from lib.utils import get_quick_loader, predict_test, flatten, predict_nll_hess, train_model, predict_train2
+from lib.utils import get_quick_loader, predict_test, flatten, predict_nll_hess, train_model, predict_train2, get_estimated_nll
 from lib.variances import get_covariance_from_iblr, get_covariance_from_adam, get_pred_vars_optim, get_pred_vars_laplace
 
 import h5py
@@ -220,11 +220,8 @@ if __name__ == "__main__":
     test_acc, test_nll = predict_test(net, testloader_eval, nc, te_targets, device)
     print(f"Test Acc: {(100 * test_acc):>0.2f}%, Test NLL: {test_nll:>6f}")
 
-    # Compute prediction variances
-    vars = get_pred_vars_laplace(net, trainloader_vars, args.delta, nc, device, version='kfac')
-
-    # Compute and store sensitivities
-    sensitivities = np.asarray(residuals) * np.asarray(lambdas) * np.asarray(vars)
+    vars_diag = vars.diagonal(dim1=1, dim2=2)
+    sensitivities = np.asarray(residuals) * np.asarray(lambdas) * np.asarray(vars_diag)
     sensitivities = np.sum(np.abs(sensitivities), axis=-1)
 
     if args.dataset == 'MOON':

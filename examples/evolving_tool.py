@@ -344,11 +344,8 @@ if __name__ == "__main__":
                 test_acc, test_nll = predict_test(net, testloader_eval, nc, te_targets, device)
                 print(f"Test Acc: {(100 * test_acc):>0.2f}%, Test NLL: {test_nll:>6f}")
 
-                # Compute prediction variances
-                vars = get_pred_vars_laplace(net, trainloader_vars, args.delta, nc, device, version='kfac')
-
-                # Compute and store sensitivities
-                sensitivities = np.asarray(residuals) * np.asarray(lambdas) * np.asarray(vars)
+                vars_diag = vars.diagonal(dim1=1, dim2=2)
+                sensitivities = np.asarray(residuals) * np.asarray(lambdas) * np.asarray(vars_diag)
                 sensitivities = np.sum(np.abs(sensitivities), axis=-1)
 
                 all_prob.append(probs)
